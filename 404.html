@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="fr" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>404 - Page Non Trouvée | Music Refs</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Google Fonts: Montserrat & Orbitron -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;900&family=Orbitron:wght@600;800;900&display=swap" rel="stylesheet">
+
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Montserrat', 'sans-serif'],
+            display: ['Orbitron', 'sans-serif'],
+          },
+          colors: {
+            neonPink: '#ff007f',
+            neonCyan: '#00f0ff',
+            neonPurple: '#8a2be2',
+            darkBg: '#0b0f19',
+            cardBg: '#151c2e',
+          },
+          animation: {
+            'spin-slow': 'spin 20s linear infinite',
+            'pulse-glow': 'pulseGlow 2s ease-in-out infinite alternate',
+          },
+          keyframes: {
+            pulseGlow: {
+              '0%': { boxShadow: '0 0 15px rgba(255, 0, 127, 0.4)' },
+              '100%': { boxShadow: '0 0 30px rgba(0, 240, 255, 0.8)' },
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    body {
+      background-color: #0b0f19;
+      color: #e2e8f0;
+      background-image: 
+        radial-gradient(at 10% 10%, rgba(255, 0, 127, 0.12) 0px, transparent 50%),
+        radial-gradient(at 90% 90%, rgba(0, 240, 255, 0.12) 0px, transparent 50%),
+        radial-gradient(at 50% 50%, rgba(138, 43, 226, 0.08) 0px, transparent 60%);
+      background-attachment: fixed;
+    }
+    .glass-card {
+      background: rgba(21, 28, 46, 0.75);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    .vinyl-grooves {
+      background: repeating-radial-gradient(
+        #111 0,
+        #111 2px,
+        #222 3px,
+        #222 4px
+      );
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col justify-between p-4 md:p-8 font-sans antialiased">
+
+  <!-- Header -->
+  <header class="max-w-4xl mx-auto w-full mb-6">
+    <div class="glass-card rounded-2xl p-4 md:p-6 shadow-2xl flex justify-between items-center border border-purple-500/30">
+      <div class="flex items-center space-x-3">
+        <div class="relative w-12 h-12 rounded-full vinyl-grooves animate-spin-slow flex items-center justify-center border-2 border-neonCyan shadow-lg">
+          <div class="w-4 h-4 bg-neonPink rounded-full border border-white"></div>
+        </div>
+        <div>
+          <a href="/" class="font-display font-black text-2xl md:text-3xl tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-neonPink via-purple-400 to-neonCyan">
+            MUSIC REFS
+          </a>
+          <p class="text-xs text-gray-400">Application & Service API</p>
+        </div>
+      </div>
+      <div>
+        <a href="/" class="text-xs bg-purple-900/60 hover:bg-purple-800/80 text-purple-200 px-4 py-2 rounded-xl border border-purple-500/30 font-bold transition">
+          🏠 Accueil
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Error Card -->
+  <main class="max-w-2xl mx-auto w-full flex-grow flex flex-col justify-center my-auto">
+    <div class="glass-card rounded-3xl p-8 md:p-12 shadow-2xl text-center space-y-6 border border-rose-500/30 relative overflow-hidden">
+      
+      <!-- Glow effect -->
+      <div class="absolute -top-20 -right-20 w-40 h-40 bg-rose-500/20 rounded-full blur-3xl pointer-events-none"></div>
+      <div class="absolute -bottom-20 -left-20 w-40 h-40 bg-neonCyan/20 rounded-full blur-3xl pointer-events-none"></div>
+
+      <!-- Icon & Status -->
+      <div class="space-y-2">
+        <p class="font-display font-black text-7xl md:text-8xl text-transparent bg-clip-text bg-gradient-to-r from-rose-500 via-purple-400 to-neonCyan tracking-widest">
+          404
+        </p>
+        <h1 class="text-2xl md:text-3xl font-extrabold text-white">
+          Oups ! Fausse Note 🎵
+        </h1>
+      </div>
+
+      <p class="text-sm md:text-base text-gray-300 max-w-md mx-auto leading-relaxed">
+        La page ou la ressource que vous recherchez sur <code class="text-neonCyan bg-black/40 px-2 py-1 rounded">music-refs-dev.kladriva.ca</code> n'existe pas ou a été déplacée.
+      </p>
+
+      <!-- Navigation Links -->
+      <div class="flex flex-col sm:flex-row items-center justify-center gap-3 pt-4">
+        <a href="/" class="w-full sm:w-auto bg-gradient-to-r from-neonPink to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition transform active:scale-95 text-center">
+          🏠 Retour à l'Accueil Frontend
+        </a>
+        <a href="/docs" class="w-full sm:w-auto bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 font-semibold py-3 px-6 rounded-xl transition text-center">
+          📚 Swagger API Docs (/docs)
+        </a>
+      </div>
+
+      <!-- Quick Links List -->
+      <div class="pt-6 border-t border-white/10 text-xs text-gray-400 space-y-2">
+        <p class="font-semibold text-gray-300">Ressources utiles :</p>
+        <div class="flex flex-wrap justify-center gap-4 text-purple-300">
+          <a href="/api/music-refs/quotes" class="hover:underline">🎵 GET /api/music-refs/quotes</a>
+          <a href="/api/music-refs/random" class="hover:underline">🎲 GET /api/music-refs/random</a>
+          <a href="/health" class="hover:underline">💚 GET /health</a>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer class="max-w-4xl mx-auto w-full mt-8 text-center text-xs text-gray-500">
+    <p>Music Refs v1.0.0 — Page d'Erreur 404 Personnalisée</p>
+  </footer>
+
+</body>
+</html>

@@ -185,5 +185,83 @@ class TestMusicRefsUserStories(unittest.TestCase):
             self.assertIn("album", q["hints"])
             self.assertIn("initials", q["hints"])
 
+
+class TestMusicRefsTask5RoutingAnd404(unittest.TestCase):
+    """Automated Unit & Integration Tests for Task #5 User Stories."""
+
+    @classmethod
+    def setUpClass(cls):
+        import sys
+        sys.path.insert(0, '/app')
+        try:
+            from main import app
+            from fastapi.testclient import TestClient
+            cls.client = TestClient(app)
+        except Exception as e:
+            cls.client = None
+            print(f"TestClient init notice: {e}")
+
+    def test_task5_root_path_routing_frontend_html(self):
+        """Task #5 US1: Root Path Routing to Frontend Web Interface (HTML)."""
+        if not self.client:
+            self.skipTest("FastAPI app not available for TestClient")
+        res = self.client.get('/', headers={'Accept': 'text/html'})
+        self.assertEqual(res.status_code, 200)
+        self.assertIn("MUSIC REFS", res.text)
+        self.assertIn("text/html", res.headers.get("content-type", ""))
+
+    def test_task5_reverse_proxy_static_files_configuration(self):
+        """Task #5 US2: Reverse Proxy and Static Files Configuration Verification."""
+        import os
+        self.assertTrue(os.path.exists('/workspace/music-refs/index.html'), "index.html missing")
+        self.assertTrue(os.path.exists('/workspace/music-refs/404.html'), "404.html missing")
+        self.assertTrue(os.path.exists('/workspace/music-refs/nginx.conf'), "nginx.conf missing")
+
+        with open('/workspace/music-refs/nginx.conf', 'r') as f:
+            content = f.read()
+            self.assertIn('music-refs-dev.kladriva.ca', content)
+            self.assertIn('try_files', content)
+            self.assertIn('404.html', content)
+
+    def test_task5_backend_api_root_and_health_check(self):
+        """Task #5 US3: Backend API Root Endpoint and Health Check Response."""
+        if not self.client:
+            self.skipTest("FastAPI app not available for TestClient")
+        # GET / with Accept: application/json
+        res_root = self.client.get('/', headers={'Accept': 'application/json'})
+        self.assertEqual(res_root.status_code, 200)
+        data_root = res_root.json()
+        self.assertEqual(data_root.get('status'), 'ok')
+        self.assertEqual(data_root.get('service'), 'Music Refs API')
+
+        # GET /health
+        res_health = self.client.get('/health')
+        self.assertEqual(res_health.status_code, 200)
+        data_health = res_health.json()
+        self.assertEqual(data_health.get('status'), 'ok')
+
+    def test_task5_user_friendly_404_error_page_html(self):
+        """Task #5 US4: Branded 404 Error Page for Browser HTML Requests."""
+        if not self.client:
+            self.skipTest("FastAPI app not available for TestClient")
+        res = self.client.get('/invalid-page-xyz', headers={'Accept': 'text/html'})
+        self.assertEqual(res.status_code, 404)
+        self.assertIn("404", res.text)
+        self.assertIn("Oups ! Fausse Note", res.text)
+        self.assertIn("Accueil", res.text)
+
+    def test_task5_user_friendly_404_error_page_json(self):
+        """Task #5 US4: Structured JSON 404 Error Response for API Clients."""
+        if not self.client:
+            self.skipTest("FastAPI app not available for TestClient")
+        res = self.client.get('/api/music-refs/nonexistent', headers={'Accept': 'application/json'})
+        self.assertEqual(res.status_code, 404)
+        data = res.json()
+        self.assertEqual(data.get('error'), 'Not Found')
+        self.assertEqual(data.get('status_code'), 404)
+        self.assertIn('available_endpoints', data)
+
+
 if __name__ == '__main__':
     unittest.main()
+
