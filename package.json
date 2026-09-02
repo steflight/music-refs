@@ -1,0 +1,11 @@
+{
+  "name": "music-refs",
+  "version": "1.0.0",
+  "description": "Music Refs - Le Jeu des Punchlines & Citations",
+  "scripts": {
+    "test": "python3 -m unittest discover -s tests && npx vitest run"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.11"
+  }
+}
