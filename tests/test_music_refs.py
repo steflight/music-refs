@@ -262,6 +262,159 @@ class TestMusicRefsTask5RoutingAnd404(unittest.TestCase):
         self.assertIn('available_endpoints', data)
 
 
+class TestMusicRefsTask6SSLAndSNI(unittest.TestCase):
+    """Automated Unit & Integration Tests for Task #6 SSL/TLS, SNI & Monitoring User Stories."""
+
+    @classmethod
+    def setUpClass(cls):
+        import sys
+        sys.path.insert(0, '/workspace/music-refs')
+        from scripts import cert_manager, ssl_monitor
+        cls.cert_manager = cert_manager
+        cls.ssl_monitor = ssl_monitor
+
+        # Ensure certificates exist
+        cls.cert_manager.generate_certificate()
+
+    def test_task6_us1_ssl_certificate_provisioning_and_san(self):
+        """Task #6 US1: Provision and Configure SSL/TLS Certificate for Subdomain."""
+        cert_path = self.cert_manager.CERT_PATH
+        key_path = self.cert_manager.KEY_PATH
+
+        import os
+        self.assertTrue(os.path.exists(cert_path), "SSL Certificate file missing")
+        self.assertTrue(os.path.exists(key_path), "SSL Key file missing")
+
+        details = self.cert_manager.get_certificate_details(cert_path)
+        self.assertNotIn("error", details)
+        self.assertEqual(details.get("domain"), "music-refs-dev.kladriva.ca")
+
+        # Verify SAN contains subdomain
+        san_str = " ".join(details.get("subject_alt_names", []))
+        self.assertIn("music-refs-dev.kladriva.ca", san_str)
+
+        expiry = details.get("expiry", {})
+        self.assertTrue(expiry.get("valid"))
+        self.assertGreater(expiry.get("days_remaining", 0), 30)
+
+    def test_task6_us2_reverse_proxy_sni_and_virtual_host_settings(self):
+        """Task #6 US2: Configure Reverse Proxy SNI and Virtual Host Settings."""
+        import os
+        nginx_conf_path = '/workspace/music-refs/nginx.conf'
+        self.assertTrue(os.path.exists(nginx_conf_path))
+
+        with open(nginx_conf_path, 'r') as f:
+            content = f.read()
+
+        # Virtual host & SNI check
+        self.assertIn('server_name music-refs-dev.kladriva.ca;', content)
+        self.assertIn('listen 443 ssl', content)
+        self.assertIn('ssl_certificate /workspace/music-refs/certs/music-refs-dev.kladriva.ca.crt;', content)
+        self.assertIn('ssl_certificate_key /workspace/music-refs/certs/music-refs-dev.kladriva.ca.key;', content)
+
+        # TLS versions & Ciphers
+        self.assertIn('ssl_protocols TLSv1.2 TLSv1.3;', content)
+        self.assertIn('ssl_ciphers', content)
+        self.assertIn('ssl_session_cache', content)
+
+        # HTTP to HTTPS redirect
+        self.assertIn('return 301 https://$host$request_uri;', content)
+
+    def test_task6_us3_automate_ssl_certificate_management_and_renewal(self):
+        """Task #6 US3: Automate SSL Certificate Management and Renewal."""
+        expiry_info = self.cert_manager.check_certificate_expiry()
+        self.assertTrue(expiry_info.get("valid"))
+        self.assertFalse(expiry_info.get("needs_renewal"))
+
+        # Test renewal logic when valid
+        renew_res = self.cert_manager.renew_certificate_if_needed()
+        self.assertEqual(renew_res.get("status"), "valid")
+        self.assertEqual(renew_res.get("action_taken"), "none")
+
+        # Test forced renewal
+        force_renew_res = self.cert_manager.renew_certificate_if_needed(force=True)
+        self.assertEqual(force_renew_res.get("status"), "created_or_renewed")
+        self.assertEqual(force_renew_res.get("action_taken"), "renewed")
+
+    def test_task6_us4_ssl_handshake_and_domain_monitoring(self):
+        """Task #6 US4: Implement SSL/TLS Handshake and Domain Health Monitoring."""
+        import http.server
+        import ssl
+        import threading
+        import socket
+
+        # Test local certificate monitoring logic
+        cert_report = self.ssl_monitor.check_local_certificate()
+        self.assertTrue(cert_report.get("valid"))
+        self.assertEqual(cert_report.get("status"), "OK")
+        self.assertGreater(cert_report.get("days_remaining"), 30)
+
+        # Start a temporary local HTTPS server with SNI to test live TLS handshake
+        class SimpleHandler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(b'{"status": "ok", "service": "Music Refs Mock HTTPS"}')
+
+            def log_message(self, format, *args):
+                pass
+
+        # Pick an available port
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind(('127.0.0.1', 0))
+        port = sock.getsockname()[1]
+        sock.close()
+
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(
+            certfile=self.cert_manager.CERT_PATH,
+            keyfile=self.cert_manager.KEY_PATH
+        )
+
+        class QuietHTTPServer(http.server.HTTPServer):
+            def handle_error(self, request, client_address):
+                pass
+
+        httpd = QuietHTTPServer(('127.0.0.1', port), SimpleHandler)
+        httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
+
+        server_thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        server_thread.start()
+
+        try:
+            # Test live TLS handshake with SNI
+            tls_res = self.ssl_monitor.perform_tls_handshake_check(
+                host="127.0.0.1",
+                port=port,
+                sni_hostname="music-refs-dev.kladriva.ca"
+            )
+            self.assertTrue(tls_res.get("handshake_success"))
+            self.assertEqual(tls_res.get("status"), "OK")
+            self.assertIn("TLS", tls_res.get("protocol", ""))
+
+            # Test full domain health report with live HTTPS server endpoint
+            health_url = f"https://127.0.0.1:{port}/health"
+            full_report = self.ssl_monitor.run_full_domain_health_check(
+                host="127.0.0.1",
+                port=port,
+                sni_hostname="music-refs-dev.kladriva.ca",
+                cert_path=self.cert_manager.CERT_PATH,
+                health_url=health_url
+            )
+
+            self.assertEqual(full_report.get("overall_status"), "OK")
+            self.assertTrue(full_report.get("certificate_check", {}).get("valid"))
+            self.assertTrue(full_report.get("tls_handshake_check", {}).get("handshake_success"))
+            self.assertTrue(full_report.get("endpoint_check", {}).get("reachable"))
+            self.assertEqual(full_report.get("endpoint_check", {}).get("status_code"), 200)
+
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+
+
 if __name__ == '__main__':
     unittest.main()
+
 

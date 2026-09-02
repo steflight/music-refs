@@ -1,44 +1,46 @@
-# Music Refs - Le Jeu des Punchlines & Citations (Task #5)
+# Music Refs - Le Jeu des Punchlines & Citations (Task #6)
 
 **Music Refs** est une application web moderne et interactive permettant aux passionnés de musique de deviner des artistes et des chansons à partir de citations et punchlines tirées au sort.
 
 ---
 
-## 🎯 User Stories Implémentées (Task #5 - Routage, Reverse Proxy & 404)
+## 🎯 User Stories Implémentées (Task #6 - SSL/TLS, Reverse Proxy SNI & Surveillance)
 
-### 1. Routage de la Racine (`/`) vers l'Interface Web Frontend
-- **Fichiers** : [`index.html`](index.html), [`/app/main.py`](/app/main.py)
+### 1. Provisionnement et Configuration de Certificat SSL/TLS pour le Sous-Domaine
+- **Fichiers** : [`certs/music-refs-dev.kladriva.ca.crt`](certs/music-refs-dev.kladriva.ca.crt), [`certs/music-refs-dev.kladriva.ca.key`](certs/music-refs-dev.kladriva.ca.key), [`scripts/cert_manager.py`](scripts/cert_manager.py)
 - **Description** :
-  - Les requêtes HTTP navigateur vers `http://music-refs-dev.kladriva.ca/` (URL racine `/`) servent directement l'interface SPA `index.html` au lieu de renvoyer une erreur JSON 404 brute.
+  - Génération et provisionnement de certificats SSL/TLS RSA 2048-bit avec extension SAN (Subject Alternative Name) pour `music-refs-dev.kladriva.ca`.
+  - Résout le problème `ERR_SSL_UNRECOGNIZED_NAME_ALERT` en garantissant un handshake TLS valide.
 
-### 2. Configuration Reverse Proxy et Serveur de Fichiers Statiques
-- **Fichiers** : [`nginx.conf`](nginx.conf), [`/workspace/nginx-proxy-manager/migrate_hosts.py`](/workspace/nginx-proxy-manager/migrate_hosts.py)
+### 2. Configuration Reverse Proxy SNI & Hôtes Virtuels
+- **Fichiers** : [`nginx.conf`](nginx.conf)
 - **Description** :
-  - Configuration Nginx reverse proxy et serveur de fichiers statiques permettant de servir les assets de l'application et de rediriger les requêtes vers l'API Uvicorn/FastAPI backend.
+  - Mis à jour pour supporter la gestion SNI sur le port 443 avec HTTP/2.
+  - Redirection automatique HTTP (80) vers HTTPS (443).
+  - Protocoles sécurisés activés : `TLSv1.2` et `TLSv1.3`.
+  - En-têtes de sécurité HSTS (`Strict-Transport-Security`), `X-Frame-Options`, `X-Content-Type-Options`.
 
-### 3. Endpoint Racine API Backend & Health Check
-- **Fichiers** : [`/app/main.py`](/app/main.py)
+### 3. Gestion Automatisée et Renouvellement des Certificats SSL
+- **Fichiers** : [`scripts/cert_manager.py`](scripts/cert_manager.py)
 - **Description** :
-  - L'endpoint backend `GET /health` (et `GET /` avec header `Accept: application/json`) renvoie un message JSON structuré (`status: ok`, `service: Music Refs API`, `docs: /docs`), évitant les réponses 404 brutes.
+  - Script automatisé pour vérifier l'expiration du certificat et déclencher le renouvellement automatique lorsque l'échéance est inférieure au seuil (ex: 30 jours) ou sur demande force (`--force`).
 
-### 4. Page d'Erreur 404 Personnalisée et Marquée
-- **Fichiers** : [`404.html`](404.html), [`/app/main.py`](/app/main.py)
+### 4. Surveillance des Handshakes SSL/TLS et de la Santé du Domaine
+- **Fichiers** : [`scripts/ssl_monitor.py`](scripts/ssl_monitor.py)
 - **Description** :
-  - Page d'erreur HTML 404 aux couleurs de Music Refs avec liens de navigation vers l'accueil (`/`) et la documentation API (`/docs`).
-  - Gestionnaire d'exception 404 backend adaptatif (HTML pour navigateur, JSON structuré pour les requêtes API).
+  - Script de surveillance qui effectue un test de handshake TLS réel avec SNI, vérifie la chaîne de certificats, contrôle la disponibilité de l'endpoint d'API (`/health`) et génère un rapport de santé JSON structuré (`OK`, `WARNING`, `CRITICAL`).
 
 ---
 
 ## 🧪 Suite de Tests Automated
 
-- **Tests unitaires et d'intégration Backend & Routage (Python unittest)** : [`tests/test_music_refs.py`](tests/test_music_refs.py)
-  - 11 tests automatisés couvrant les User Stories des tâches #4 et #5 (`python3 -m unittest discover -s /workspace/music-refs/tests`).
+- **Tests unitaires et d'intégration (Python unittest)** : [`tests/test_music_refs.py`](tests/test_music_refs.py)
+  - 15 tests automatisés couvrant l'ensemble des fonctionnalités des tâches #4, #5 et #6 (`python3 -m unittest discover -s /workspace/music-refs/tests`).
 
 ---
 
 ## 📌 Informations Git & Branche
 
-- **Branche de feature** : `ada-feature-5`
+- **Branche de feature** : `ada-feature-6`
 - **Remote Origin** : `origin`
-- **Message de commit** : `feat: implement user stories for task #5`
-
+- **Message de commit** : `feat: implement user stories for task #6`
