@@ -44,3 +44,7 @@ Réponse courte : **oui**, le plan est présent dans la codebase. Détail ci-des
 ## Livraison v1.2 — catégories & parties
 
 Voir [02-categories-et-parties.md](02-categories-et-parties.md) — **implémenté** (2026-09-07).
+
+## Mobile natif (planifié)
+
+Voir [03-mobile-android-ios.md](03-mobile-android-ios.md) — prompt monorepo `android/` (Kotlin) + `ios/` (SwiftUI). **Pas encore implémenté.**
