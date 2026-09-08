@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="fr" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0f19">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>Music Refs — Partie entre amis</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;900&family=Orbitron:wght@700;900&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Montserrat', 'sans-serif'], display: ['Orbitron', 'sans-serif'] },
+          colors: { neonPink: '#ff007f', neonCyan: '#00f0ff', cardBg: '#151c2e' }
+        }
+      }
+    }
+  </script>
+  <style>
+    :root { --safe-top: env(safe-area-inset-top, 0px); --safe-bottom: env(safe-area-inset-bottom, 0px); }
+    html { -webkit-text-size-adjust: 100%; }
+    body {
+      background: #0b0f19;
+      background-image:
+        radial-gradient(at 15% 10%, rgba(255,0,127,.12), transparent 45%),
+        radial-gradient(at 85% 90%, rgba(0,240,255,.1), transparent 45%);
+      padding-top: max(0.75rem, var(--safe-top));
+      padding-bottom: max(0.75rem, var(--safe-bottom));
+      overscroll-behavior-y: contain;
+    }
+    input, select, button { font-size: 16px; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+    .tap { min-height: 48px; }
+    .panel { background: rgba(21,28,46,.88); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+  </style>
+</head>
+<body class="min-h-screen text-slate-200 font-sans px-3 py-3 sm:p-4 md:p-8">
+  <div class="max-w-3xl mx-auto space-y-4 sm:space-y-5">
+    <header class="sticky top-0 z-40 -mx-3 px-3 py-2 sm:mx-0 sm:px-0 sm:py-0 mb-1 sm:mb-0 bg-[#0b0f19]/95 backdrop-blur-md border-b border-white/10 sm:border-0 sm:bg-transparent sm:backdrop-blur-none flex items-center justify-between gap-3">
+      <div class="min-w-0">
+        <h1 class="font-display text-xl sm:text-2xl text-transparent bg-clip-text bg-gradient-to-r from-neonPink to-neonCyan">PARTIE AMIS</h1>
+        <p class="text-[11px] sm:text-xs text-slate-400 truncate">Même catégorie · mêmes punchlines · classement</p>
+      </div>
+      <a href="/" class="tap shrink-0 inline-flex items-center px-3 rounded-xl border border-neonCyan/40 bg-neonCyan/10 text-sm font-semibold text-neonCyan">← Accueil</a>
+    </header>
+
+    <section id="setup" class="panel border border-white/10 rounded-2xl p-4 sm:p-5 space-y-4">
+      <div id="join-by-link" class="hidden space-y-3 border border-neonCyan/30 rounded-2xl p-4 bg-neonCyan/5">
+        <h2 class="text-base font-semibold text-neonCyan">On t’invite</h2>
+        <p class="text-xs text-slate-400">Salon <span id="invite-code-label" class="font-display tracking-widest text-white"></span></p>
+        <p class="text-sm text-slate-300">Saisis juste ton prénom pour entrer.</p>
+        <label class="block text-xs text-slate-400">Ton prénom
+          <input id="invite-name" class="tap mt-1.5 w-full rounded-xl bg-black/40 border border-white/10 px-4 text-white" placeholder="Sam" autofocus autocomplete="nickname" />
+        </label>
+        <button id="btn-join-link" class="tap w-full bg-gradient-to-r from-neonPink to-purple-600 font-semibold rounded-xl active:scale-[0.98] transition">Rejoindre la partie</button>
+        <p id="invite-status" class="text-xs text-slate-500"></p>
+        <a href="/party.html" class="text-xs text-slate-500 hover:underline inline-block py-1">Créer un autre salon</a>
+      </div>
+
+      <div id="setup-full" class="grid gap-5 sm:grid-cols-2 sm:gap-4">
+        <div class="space-y-3">
+          <h2 class="text-sm font-semibold">Créer un salon</h2>
+          <label class="block text-xs text-slate-400">Ton prénom
+            <input id="host-name" class="tap mt-1.5 w-full rounded-xl bg-black/40 border border-white/10 px-4 text-white" placeholder="Alex" autocomplete="nickname" />
+          </label>
+          <label class="block text-xs text-slate-400">Catégorie
+            <select id="category" class="tap mt-1.5 w-full rounded-xl bg-black/40 border border-white/10 px-3 text-white"></select>
+          </label>
+          <label class="block text-xs text-slate-400">Mode
+            <select id="party-mode" class="tap mt-1.5 w-full rounded-xl bg-black/40 border border-white/10 px-3 text-white">
+              <option value="classic">Normal (saisie libre)</option>
+              <option value="easy">Facile (quiz à choix)</option>
+            </select>
+          </label>
+          <label class="block text-xs text-slate-400">Nombre de punchlines
+            <input id="rounds" type="number" min="3" max="30" value="8" inputmode="numeric" class="tap mt-1.5 w-full rounded-xl bg-black/40 border border-white/10 px-4 text-white" />
+          </label>
+          <button id="btn-create" class="tap w-full bg-gradient-to-r from-neonPink to-purple-600 font-semibold rounded-xl active:scale-[0.98]">Créer</button>
+        </div>
+        <div class="space-y-3 border-t border-white/10 pt-4 sm:border-t-0 sm:pt-0">
+          <h2 class="text-sm font-semibold">Rejoindre avec un code</h2>
+          <label class="block text-xs text-slate-400">Ton prénom
+            <input id="join-name" class="tap mt-1.5 w-full rounded-xl bg-black/40 border border-white/10 px-4 text-white" placeholder="Sam" autocomplete="nickname" />
+          </label>
+          <label class="block text-xs text-slate-400">Code salon
+            <input id="join-code" class="tap mt-1.5 w-full rounded-xl bg-black/40 border border-white/10 px-4 uppercase tracking-[0.25em] text-center text-neonCyan" placeholder="ABC123" maxlength="8" autocapitalize="characters" />
+          </label>
+          <button id="btn-join" class="tap w-full bg-neonCyan/20 border border-neonCyan/40 text-neonCyan font-semibold rounded-xl">Rejoindre</button>
+        </div>
+      </div>
+      <p id="setup-status" class="text-xs text-slate-500"></p>
+    </section>
+
+    <section id="lobby" class="hidden panel border border-white/10 rounded-2xl p-4 sm:p-5 space-y-4">
+      <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div class="text-center sm:text-left">
+          <p class="text-xs text-slate-400">Code salon</p>
+          <p id="lobby-code" class="font-display text-4xl sm:text-3xl tracking-[0.28em] text-neonCyan">------</p>
+          <p id="lobby-cat" class="text-xs text-slate-400 mt-1"></p>
+        </div>
+        <button id="btn-start" class="hidden tap w-full sm:w-auto bg-gradient-to-r from-neonPink to-purple-600 font-semibold px-6 rounded-xl">Lancer la partie</button>
+      </div>
+      <div class="space-y-2 rounded-2xl border border-neonCyan/25 bg-black/25 p-3 sm:p-4">
+        <p class="text-xs text-slate-400">Lien d’invitation — tes amis n’ont qu’à entrer leur prénom</p>
+        <input id="invite-link" readonly class="w-full rounded-xl bg-black/40 border border-white/10 px-3 py-3 text-xs text-neonCyan" />
+        <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <button id="btn-copy-link" type="button" class="tap rounded-xl bg-neonCyan/20 border border-neonCyan/40 text-neonCyan text-sm font-semibold">Copier le lien</button>
+          <button id="btn-share-link" type="button" class="hidden tap rounded-xl bg-neonPink/20 border border-neonPink/40 text-neonPink text-sm font-semibold">Envoyer</button>
+        </div>
+        <p id="link-status" class="text-[11px] text-slate-500"></p>
+      </div>
+      <div>
+        <p class="text-xs text-slate-400 mb-2">Joueurs</p>
+        <ul id="lobby-players" class="space-y-2 text-sm"></ul>
+      </div>
+      <p id="lobby-status" class="text-xs text-slate-500">En attente… Envoie le lien.</p>
+      <a href="/" class="tap inline-flex items-center justify-center w-full rounded-xl border border-white/15 text-sm text-slate-300">← Retour à l’accueil</a>
+    </section>
+
+    <section id="game" class="hidden space-y-3 sm:space-y-4">
+      <div class="panel border border-white/10 rounded-2xl p-3 sm:p-4 flex justify-between items-center gap-2">
+        <div class="flex-1 text-center">
+          <p class="text-[10px] uppercase text-slate-500">Score</p>
+          <p id="g-score" class="font-display text-2xl text-neonCyan">0</p>
+        </div>
+        <div class="flex-1 text-center">
+          <p class="text-[10px] uppercase text-slate-500">Moi</p>
+          <p id="g-progress" class="text-sm font-semibold">0 / 0</p>
+        </div>
+        <div class="flex-1 text-center">
+          <p class="text-[10px] uppercase text-slate-500">Salon</p>
+          <p id="g-code" class="font-display text-xs sm:text-sm tracking-widest text-neonPink"></p>
+        </div>
+      </div>
+
+      <!-- Live bowling-style scoreboard -->
+      <div class="panel border border-neonCyan/20 rounded-2xl p-3 sm:p-4 space-y-2">
+        <div class="flex items-center justify-between gap-2">
+          <p class="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Classement en direct</p>
+          <p id="live-board-meta" class="text-[10px] text-slate-500">mise à jour…</p>
+        </div>
+        <div id="live-board" class="space-y-2"></div>
+      </div>
+
+      <div class="panel border border-purple-500/20 rounded-2xl p-4 sm:p-6 space-y-4">
+        <p class="text-[10px] uppercase text-slate-500">Punchline</p>
+        <p id="g-quote" class="text-base sm:text-xl font-semibold leading-relaxed">—</p>
+        <form id="g-form" class="grid gap-3">
+          <div id="g-classic" class="grid gap-3">
+            <input id="g-artist" class="tap rounded-xl bg-black/40 border border-white/10 px-4 text-white" placeholder="Artiste / Influenceur" autocomplete="off" autocapitalize="words" />
+            <input id="g-title" class="tap rounded-xl bg-black/40 border border-white/10 px-4 text-white" placeholder="Titre / Moment" autocomplete="off" />
+          </div>
+          <div id="g-quiz" class="hidden space-y-3">
+            <div>
+              <p class="text-xs text-slate-400 mb-2">Qui est derrière cette punchline ?</p>
+              <div id="g-quiz-artists" class="grid grid-cols-1 sm:grid-cols-2 gap-2"></div>
+            </div>
+            <div>
+              <p class="text-xs text-slate-400 mb-2">Quel titre / moment ?</p>
+              <div id="g-quiz-titles" class="grid grid-cols-1 sm:grid-cols-2 gap-2"></div>
+            </div>
+          </div>
+          <button class="tap bg-gradient-to-r from-neonPink to-purple-600 font-semibold rounded-xl active:scale-[0.98]">Valider</button>
+        </form>
+        <div id="g-reveal" class="hidden text-sm text-emerald-300 break-words"></div>
+        <button id="g-next" type="button" class="tap w-full rounded-xl border border-white/15 active:bg-white/5 text-sm">Suivant / Passer</button>
+        <p id="g-toast" class="text-xs text-slate-400"></p>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+          <a href="/" class="tap inline-flex items-center justify-center rounded-xl border border-neonCyan/40 bg-neonCyan/10 text-neonCyan text-sm font-semibold">← Accueil</a>
+          <a href="/party.html" class="tap inline-flex items-center justify-center rounded-xl border border-white/15 text-slate-300 text-sm">Quitter le salon</a>
+        </div>
+      </div>
+    </section>
+
+    <section id="results" class="hidden panel border border-white/10 rounded-2xl p-4 sm:p-5 space-y-4">
+      <h2 class="font-display text-xl text-neonCyan">Classement</h2>
+      <ol id="leaderboard" class="space-y-2 text-sm"></ol>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <a href="/" class="tap inline-flex items-center justify-center w-full px-4 rounded-xl border border-neonCyan/40 bg-neonCyan/10 text-neonCyan text-sm font-semibold">← Accueil</a>
+        <a href="/party.html" class="tap inline-flex items-center justify-center w-full px-4 rounded-xl border border-neonPink/40 text-neonPink text-sm font-semibold">Nouvelle partie</a>
+      </div>
+    </section>
+  </div>
+
+  <script type="module">
+    import { GameEngine, buildQuizChoices } from './src/services/gameService.js';
+
+    const state = {
+      code: null,
+      playerToken: null,
+      hostToken: null,
+      isHost: false,
+      poll: null,
+      game: null,
+      startedLocal: false,
+      meId: null,
+      mode: 'classic',
+      quizPick: { artist: null, title: null },
+    };
+
+    const $ = (id) => document.getElementById(id);
+    const show = (id) => $(id).classList.remove('hidden');
+    const hide = (id) => $(id).classList.add('hidden');
+
+    async function loadCategories() {
+      const res = await fetch('/api/music-refs/categories');
+      const cats = await res.json();
+      const sel = $('category');
+      sel.innerHTML = '';
+      cats.forEach((c) => {
+        const opt = document.createElement('option');
+        opt.value = c.id;
+        opt.textContent = `${c.name} (${c.quote_count})`;
+        opt.disabled = c.quote_count === 0;
+        sel.appendChild(opt);
+      });
+    }
+
+    function joinUrl(code) {
+      const u = new URL(window.location.origin + '/party.html');
+      u.searchParams.set('code', code);
+      return u.toString();
+    }
+
+    function syncInviteUi(code) {
+      const link = joinUrl(code);
+      $('invite-link').value = link;
+      try {
+        history.replaceState(null, '', `/party.html?code=${encodeURIComponent(code)}`);
+      } catch (_) { /* ignore */ }
+      if (navigator.share) show('btn-share-link');
+      else hide('btn-share-link');
+    }
+
+    function renderPlayers(party) {
+      const ul = $('lobby-players');
+      ul.innerHTML = '';
+      (party.players || []).forEach((p) => {
+        const li = document.createElement('li');
+        li.className = 'flex justify-between items-center gap-2 border border-white/10 rounded-xl px-3 py-3';
+        li.innerHTML = `<span class="font-medium truncate">${p.name}${p.is_host ? ' · hôte' : ''}</span><span class="text-slate-500 text-xs shrink-0">${p.finished ? 'terminé' : (party.status === 'playing' ? 'en jeu' : 'prêt')}</span>`;
+        ul.appendChild(li);
+      });
+      $('lobby-code').textContent = party.code;
+      const modeLabel = (party.mode === 'easy') ? 'Facile (quiz)' : 'Normal';
+      state.mode = party.mode === 'easy' ? 'easy' : 'classic';
+      $('lobby-cat').textContent = party.category
+        ? `${party.category.name} · ${party.round_limit} punchlines · ${modeLabel}`
+        : modeLabel;
+      syncInviteUi(party.code);
+      if (state.isHost && party.status === 'lobby') show('btn-start');
+      else hide('btn-start');
+    }
+
+    function renderLiveBoard(party) {
+      const box = $('live-board');
+      if (!box) return;
+      const players = [...(party.players || [])].sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return (b.progress || 0) - (a.progress || 0);
+      });
+      const total = party.quote_count || party.round_limit || players[0]?.total || 0;
+      box.innerHTML = '';
+      if (!players.length) {
+        box.innerHTML = '<p class="text-xs text-slate-500">En attente des scores…</p>';
+        return;
+      }
+      players.forEach((p, i) => {
+        const prog = Math.min(p.progress || 0, total || p.progress || 0);
+        const pct = total ? Math.round((prog / total) * 100) : 0;
+        const isMe = state.meId != null && p.id === state.meId;
+        const row = document.createElement('div');
+        row.className = `rounded-xl border px-3 py-2.5 space-y-1.5 ${isMe ? 'border-neonCyan/50 bg-neonCyan/10' : 'border-white/10 bg-black/20'}`;
+        row.innerHTML = `
+          <div class="flex items-center justify-between gap-2 text-sm">
+            <span class="truncate font-medium">${i + 1}. ${p.name}${isMe ? ' (toi)' : ''}${p.finished ? ' ✓' : ''}</span>
+            <span class="font-display text-neonCyan shrink-0">${p.score}</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <div class="flex-1 h-1.5 rounded-full bg-white/10 overflow-hidden">
+              <div class="h-full rounded-full ${p.finished ? 'bg-emerald-400' : 'bg-neonPink'}" style="width:${p.finished ? 100 : pct}%"></div>
+            </div>
+            <span class="text-[10px] text-slate-400 shrink-0 tabular-nums">${p.finished ? 'fini' : `${prog}/${total || '?'}`}</span>
+          </div>
+        `;
+        box.appendChild(row);
+      });
+      const stamp = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      $('live-board-meta').textContent = stamp;
+    }
+
+    function renderLeaderboard(party) {
+      const ol = $('leaderboard');
+      ol.innerHTML = '';
+      [...(party.players || [])]
+        .sort((a, b) => b.score - a.score)
+        .forEach((p, i) => {
+          const li = document.createElement('li');
+          li.className = 'flex justify-between items-center rounded-xl border border-white/10 px-4 py-3';
+          li.innerHTML = `<span class="truncate">#${i + 1} ${p.name}</span><span class="font-display text-neonCyan shrink-0">${p.score}</span>`;
+          ol.appendChild(li);
+        });
+    }
+
+    async function beginGame() {
+      if (state.startedLocal) return;
+      const res = await fetch(`/api/music-refs/parties/${state.code}/quotes`);
+      const quotes = await res.json();
+      if (!res.ok) throw new Error(typeof quotes.detail === 'string' ? quotes.detail : 'Quotes indisponibles');
+      // Refresh mode from party snapshot
+      try {
+        const pRes = await fetch(`/api/music-refs/parties/${state.code}`);
+        if (pRes.ok) {
+          const p = await pRes.json();
+          state.mode = p.mode === 'easy' ? 'easy' : 'classic';
+        }
+      } catch (_) { /* ignore */ }
+      state.game = new GameEngine([]);
+      state.game.setQuotes(quotes, { ordered: true });
+      state.startedLocal = true;
+      $('g-code').textContent = state.code;
+      hide('setup'); hide('lobby'); hide('results');
+      show('game');
+      renderGame();
+      await syncScore(false); // announce progress 1 on board
+    }
+
+    function choiceBtnClass(selected) {
+      return `tap w-full text-left rounded-xl border px-3 py-3 text-sm transition ${
+        selected
+          ? 'border-neonCyan bg-neonCyan/20 text-white'
+          : 'border-white/15 bg-black/40 text-slate-200 active:bg-white/10'
+      }`;
+    }
+
+    function applyPartyAnswerPanels() {
+      const easy = state.mode === 'easy';
+      $('g-classic').classList.toggle('hidden', easy);
+      $('g-quiz').classList.toggle('hidden', !easy);
+    }
+
+    function paintPartyQuiz() {
+      if (state.mode !== 'easy' || !state.game?.currentQuote) return;
+      const choices = buildQuizChoices(state.game.currentQuote, state.game.quotes, 4);
+      state.quizPick = { artist: null, title: null };
+
+      function fill(boxId, options, field) {
+        const box = $(boxId);
+        box.innerHTML = '';
+        options.forEach((label) => {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.textContent = label;
+          btn.className = choiceBtnClass(false);
+          btn.addEventListener('click', () => {
+            state.quizPick[field] = label;
+            [...box.children].forEach((el) => {
+              el.className = choiceBtnClass(el.textContent === label);
+            });
+            if (state.quizPick.artist && state.quizPick.title) {
+              $('g-form').requestSubmit();
+            }
+          });
+          box.appendChild(btn);
+        });
+      }
+      fill('g-quiz-artists', choices.artists, 'artist');
+      fill('g-quiz-titles', choices.titles, 'title');
+    }
+
+    function renderGame() {
+      const g = state.game;
+      const q = g.currentQuote;
+      if (!q) return;
+      $('g-quote').textContent = q.quote;
+      $('g-score').textContent = g.score;
+      $('g-progress').textContent = `${g.orderIndex + 1} / ${g.quotes.length}`;
+      $('g-artist').value = '';
+      $('g-title').value = '';
+      $('g-artist').disabled = false;
+      $('g-title').disabled = false;
+      $('g-reveal').classList.add('hidden');
+      $('g-toast').textContent = '';
+      applyPartyAnswerPanels();
+      paintPartyQuiz();
+    }
+
+    async function syncScore(finished = false) {
+      const progress = state.game
+        ? (finished ? state.game.quotes.length : state.game.orderIndex + 1)
+        : 0;
+      const res = await fetch(`/api/music-refs/parties/${state.code}/score`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          player_token: state.playerToken,
+          score: state.game ? state.game.score : 0,
+          finished,
+          progress,
+        }),
+      });
+      if (res.ok) {
+        const party = await res.json();
+        if (party.me) state.meId = party.me.id;
+        renderLiveBoard(party);
+        return party;
+      }
+      return null;
+    }
+
+    async function finishGame() {
+      const party = await syncScore(true);
+      // Local player done — keep live board until everyone finishes
+      $('g-quote').textContent = 'Tu as terminé ! Regarde le classement en direct…';
+      $('g-form').classList.add('hidden');
+      $('g-next').classList.add('hidden');
+      $('g-reveal').classList.add('hidden');
+      $('g-toast').textContent = 'En attente des autres joueurs…';
+      if (party) renderLiveBoard(party);
+      if (party && party.status === 'finished') {
+        stopPoll();
+        hide('game');
+        show('results');
+        renderLeaderboard(party);
+      }
+    }
+
+    async function refreshParty() {
+      if (!state.code) return null;
+      const res = await fetch(`/api/music-refs/parties/${state.code}`);
+      const party = await res.json();
+      if (!res.ok) throw new Error(party.detail || 'Erreur salon');
+
+      if (party.status === 'lobby') {
+        hide('setup'); hide('game'); hide('results');
+        show('lobby');
+        renderPlayers(party);
+      } else if (party.status === 'playing') {
+        renderPlayers(party);
+        if (!state.startedLocal) {
+          await beginGame();
+        }
+        // Live bowling board while playing
+        if (state.startedLocal) {
+          if (party.me) state.meId = party.me.id;
+          // Prefer local score for me if we haven't synced this tick
+          renderLiveBoard(party);
+          show('game');
+          hide('lobby');
+        }
+      } else if (party.status === 'finished') {
+        stopPoll();
+        hide('setup'); hide('lobby'); hide('game');
+        show('results');
+        renderLeaderboard(party);
+      }
+      return party;
+    }
+
+    function startPoll() {
+      stopPoll();
+      state.poll = setInterval(() => {
+        refreshParty().catch(() => {});
+      }, 1500);
+    }
+    function stopPoll() {
+      if (state.poll) clearInterval(state.poll);
+      state.poll = null;
+    }
+
+    function enterLobby(data, isHost) {
+      state.code = data.code;
+      state.playerToken = data.me.player_token;
+      state.hostToken = data.me.host_token || null;
+      state.isHost = isHost;
+      state.meId = data.me.id;
+      state.mode = data.mode === 'easy' ? 'easy' : 'classic';
+      state.startedLocal = false;
+      state.game = null;
+      hide('setup'); hide('join-by-link'); hide('setup-full');
+      show('lobby');
+      renderPlayers(data);
+      startPoll();
+    }
+
+    async function doJoin(code, name, statusEl) {
+      statusEl.textContent = 'Connexion…';
+      const res = await fetch('/api/music-refs/parties/join', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code: (code || '').trim(),
+          player_name: (name || '').trim() || 'Joueur',
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || JSON.stringify(data));
+      enterLobby(data, false);
+      statusEl.textContent = '';
+    }
+
+    $('btn-create').addEventListener('click', async () => {
+      $('setup-status').textContent = 'Création…';
+      try {
+        const res = await fetch('/api/music-refs/parties', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            category_id: Number($('category').value),
+            host_name: $('host-name').value.trim() || 'Hôte',
+            round_limit: Number($('rounds').value) || 8,
+            mode: $('party-mode').value === 'easy' ? 'easy' : 'classic',
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || JSON.stringify(data));
+        enterLobby(data, true);
+        $('setup-status').textContent = '';
+        $('link-status').textContent = 'Partage le lien ci-dessous avec tes amis.';
+      } catch (err) {
+        $('setup-status').textContent = 'Erreur: ' + err.message;
+      }
+    });
+
+    $('btn-join').addEventListener('click', async () => {
+      try {
+        await doJoin($('join-code').value, $('join-name').value, $('setup-status'));
+      } catch (err) {
+        $('setup-status').textContent = 'Erreur: ' + err.message;
+      }
+    });
+
+    $('btn-join-link').addEventListener('click', async () => {
+      const code = new URLSearchParams(window.location.search).get('code') || '';
+      try {
+        await doJoin(code, $('invite-name').value, $('invite-status'));
+      } catch (err) {
+        $('invite-status').textContent = 'Erreur: ' + err.message;
+      }
+    });
+
+    $('invite-name').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') $('btn-join-link').click();
+    });
+
+    $('btn-copy-link').addEventListener('click', async () => {
+      const link = $('invite-link').value;
+      try {
+        await navigator.clipboard.writeText(link);
+        $('link-status').textContent = 'Lien copié — envoie-le sur WhatsApp / SMS / Discord.';
+      } catch (_) {
+        $('invite-link').select();
+        document.execCommand('copy');
+        $('link-status').textContent = 'Lien sélectionné — Ctrl+C pour copier.';
+      }
+    });
+
+    $('btn-share-link').addEventListener('click', async () => {
+      const link = $('invite-link').value;
+      try {
+        await navigator.share({
+          title: 'Music Refs — rejoins ma partie',
+          text: `Rejoins ma partie Music Refs (code ${state.code}). Ouvre le lien et entre ton prénom :`,
+          url: link,
+        });
+      } catch (_) { /* cancelled */ }
+    });
+
+    $('btn-start').addEventListener('click', async () => {
+      try {
+        const res = await fetch(`/api/music-refs/parties/${state.code}/start`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ host_token: state.hostToken }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || JSON.stringify(data));
+        await beginGame();
+      } catch (err) {
+        $('lobby-status').textContent = 'Erreur: ' + err.message;
+      }
+    });
+
+    $('g-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const artist = state.mode === 'easy'
+        ? (state.quizPick.artist || '').trim()
+        : $('g-artist').value.trim();
+      const title = state.mode === 'easy'
+        ? (state.quizPick.title || '').trim()
+        : $('g-title').value.trim();
+      if (state.mode === 'easy' && (!artist || !title)) {
+        $('g-toast').textContent = 'Choisis artiste et titre.';
+        return;
+      }
+      const res = state.game.validateAnswer(artist, title);
+      $('g-score').textContent = state.game.score;
+      if (res.success) {
+        $('g-toast').textContent = `${res.message} (+${res.pointsGained})`;
+        if (state.game.artistGuessed) $('g-artist').disabled = true;
+        if (state.game.titleGuessed) $('g-title').disabled = true;
+        if (res.isFullyGuessed) {
+          $('g-reveal').textContent = `${state.game.currentQuote.artist} — ${state.game.currentQuote.title}`;
+          $('g-reveal').classList.remove('hidden');
+          if (state.mode === 'easy') {
+            $('g-quiz-artists').querySelectorAll('button').forEach((b) => { b.disabled = true; });
+            $('g-quiz-titles').querySelectorAll('button').forEach((b) => { b.disabled = true; });
+          }
+        }
+        await syncScore(false);
+      } else {
+        $('g-toast').textContent = res.message;
+      }
+    });
+
+    $('g-next').addEventListener('click', async () => {
+      const q = state.game.currentQuote;
+      if (q && (!state.game.artistGuessed || !state.game.titleGuessed)) {
+        $('g-reveal').textContent = `${q.artist} — ${q.title}`;
+        $('g-reveal').classList.remove('hidden');
+      }
+      const next = state.game.advanceOrdered();
+      await syncScore(false);
+      if (!next) {
+        await finishGame();
+        return;
+      }
+      renderGame();
+    });
+
+    await loadCategories();
+
+    // Deep link: /party.html?code=ABC123 → only ask for first name
+    const urlCode = (new URLSearchParams(window.location.search).get('code') || '').trim().toUpperCase();
+    if (urlCode) {
+      hide('setup-full');
+      show('join-by-link');
+      $('invite-code-label').textContent = urlCode;
+      $('join-code').value = urlCode;
+      // Prefetch party info for friendliness
+      try {
+        const res = await fetch(`/api/music-refs/parties/${urlCode}`);
+        const party = await res.json();
+        if (res.ok && party.category) {
+          const modeLabel = party.mode === 'easy' ? 'Facile' : 'Normal';
+          $('invite-code-label').textContent = `${urlCode} · ${party.category.name} · ${modeLabel}`;
+          state.mode = party.mode === 'easy' ? 'easy' : 'classic';
+          if (party.status !== 'lobby') {
+            $('invite-status').textContent = party.status === 'playing'
+              ? 'La partie a déjà commencé — tu ne peux plus rejoindre.'
+              : 'Cette partie est terminée.';
+            $('btn-join-link').disabled = true;
+          }
+        }
+      } catch (_) { /* ignore */ }
+    }
+  </script>
+</body>
+</html>

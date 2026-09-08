@@ -2,7 +2,10 @@
 <html lang="fr" class="dark">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0f19">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
   <title>Music Refs - Le Jeu des Punchlines & Citations</title>
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -54,18 +57,27 @@
   </script>
 
   <style>
+    :root {
+      --safe-top: env(safe-area-inset-top, 0px);
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+    }
+    html { -webkit-text-size-adjust: 100%; }
     body {
       background-color: #0b0f19;
       color: #e2e8f0;
-      background-image: 
+      background-image:
         radial-gradient(at 10% 10%, rgba(255, 0, 127, 0.12) 0px, transparent 50%),
         radial-gradient(at 90% 90%, rgba(0, 240, 255, 0.12) 0px, transparent 50%),
         radial-gradient(at 50% 50%, rgba(138, 43, 226, 0.08) 0px, transparent 60%);
-      background-attachment: fixed;
+      background-attachment: scroll;
+      padding-top: max(0.75rem, var(--safe-top));
+      padding-bottom: max(0.75rem, var(--safe-bottom));
+      overscroll-behavior-y: contain;
     }
     .glass-card {
-      background: rgba(21, 28, 46, 0.75);
+      background: rgba(21, 28, 46, 0.82);
       backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
       border: 1px solid rgba(255, 255, 255, 0.1);
     }
     .vinyl-grooves {
@@ -76,209 +88,272 @@
         #222 4px
       );
     }
+    /* iOS: avoid zoom on focus — inputs >= 16px */
+    input, select, textarea, button {
+      font-size: 16px;
+      touch-action: manipulation;
+    }
+    .tap {
+      min-height: 48px;
+      -webkit-tap-highlight-color: transparent;
+    }
+    #toast-alert {
+      position: sticky;
+      top: calc(0.5rem + var(--safe-top));
+      z-index: 40;
+    }
+    @media (max-width: 640px) {
+      .header-compact { gap: 0.75rem; }
+      .quote-mobile {
+        font-size: 1.125rem;
+        line-height: 1.55;
+        letter-spacing: 0.01em;
+      }
+      .hud-mobile {
+        width: 100%;
+        justify-content: space-around;
+        padding-left: 0.75rem;
+        padding-right: 0.75rem;
+      }
+      .actions-sticky {
+        position: sticky;
+        bottom: calc(0.5rem + var(--safe-bottom));
+        z-index: 30;
+        padding-top: 0.5rem;
+        background: linear-gradient(to top, rgba(11,15,25,0.96) 70%, rgba(11,15,25,0));
+      }
+    }
   </style>
 </head>
-<body class="min-h-screen flex flex-col justify-between p-4 md:p-8 font-sans antialiased">
+<body class="min-h-screen flex flex-col justify-between px-3 py-3 sm:p-4 md:p-8 font-sans antialiased">
 
-  <!-- Header & Scoreboard (User Story 4) -->
-  <header class="max-w-4xl mx-auto w-full mb-6">
-    <div class="glass-card rounded-2xl p-4 md:p-6 shadow-2xl flex flex-col md:flex-row justify-between items-center gap-4 border border-purple-500/30">
-      
+  <!-- Header & Scoreboard -->
+  <header class="max-w-4xl mx-auto w-full mb-3 sm:mb-6">
+    <div class="glass-card rounded-2xl p-3 sm:p-4 md:p-6 shadow-2xl flex flex-col justify-between items-stretch gap-3 md:flex-row md:items-center border border-purple-500/30 header-compact">
+
       <!-- Brand Logo -->
-      <div class="flex items-center space-x-3">
-        <div class="relative w-12 h-12 rounded-full vinyl-grooves animate-spin-slow flex items-center justify-center border-2 border-neonCyan shadow-lg">
-          <div class="w-4 h-4 bg-neonPink rounded-full border border-white"></div>
+      <div class="flex items-center justify-between gap-3">
+        <div class="flex items-center space-x-2.5 sm:space-x-3 min-w-0">
+          <div class="relative w-10 h-10 sm:w-12 sm:h-12 shrink-0 rounded-full vinyl-grooves animate-spin-slow flex items-center justify-center border-2 border-neonCyan shadow-lg">
+            <div class="w-3.5 h-3.5 sm:w-4 sm:h-4 bg-neonPink rounded-full border border-white"></div>
+          </div>
+          <div class="min-w-0">
+            <h1 class="font-display font-black text-xl sm:text-2xl md:text-3xl tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-neonPink via-purple-400 to-neonCyan truncate">
+              MUSIC REFS
+            </h1>
+            <p class="text-[11px] sm:text-xs text-gray-400">Devinez l'artiste & la chanson</p>
+          </div>
         </div>
-        <div>
-          <h1 class="font-display font-black text-2xl md:text-3xl tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-neonPink via-purple-400 to-neonCyan">
-            MUSIC REFS
-          </h1>
-          <p class="text-xs text-gray-400">Devinez l'artiste & la chanson</p>
-        </div>
+        <a href="/party.html" class="tap sm:hidden inline-flex items-center justify-center text-xs font-semibold px-3 rounded-xl bg-neonPink/20 border border-neonPink/40 text-neonPink">Amis</a>
+      </div>
+
+      <div class="flex items-center gap-2 flex-wrap">
+        <label class="text-[11px] sm:text-xs text-gray-400 flex items-center gap-2 flex-1 min-w-[9rem]">
+          <span class="shrink-0">Catégorie</span>
+          <select id="solo-category" class="tap flex-1 bg-black/50 border border-white/10 rounded-xl px-3 py-2 text-sm text-white">
+            <option value="">Toutes</option>
+          </select>
+        </label>
+        <label class="text-[11px] sm:text-xs text-gray-400 flex items-center gap-2">
+          <span class="shrink-0">Mode</span>
+          <select id="solo-mode" class="tap bg-black/50 border border-white/10 rounded-xl px-3 py-2 text-sm text-white">
+            <option value="classic">Normal</option>
+            <option value="easy">Facile (quiz)</option>
+          </select>
+        </label>
+        <a href="/party.html" class="tap hidden sm:inline-flex items-center justify-center text-xs font-semibold px-4 rounded-xl bg-neonPink/20 border border-neonPink/40 text-neonPink hover:bg-neonPink/30">Partie amis</a>
       </div>
 
       <!-- Live Score & Stats HUD -->
-      <div class="flex items-center space-x-4 md:space-x-6 bg-black/40 px-5 py-3 rounded-xl border border-white/5">
-        <!-- Score Counter -->
-        <div class="text-center">
-          <p class="text-xs uppercase text-gray-400 font-semibold tracking-wider">Score</p>
-          <p id="hud-score" class="font-display font-extrabold text-2xl text-neonCyan tracking-wide">0</p>
+      <div class="flex items-center hud-mobile space-x-3 sm:space-x-6 bg-black/40 px-3 py-2.5 sm:px-5 sm:py-3 rounded-xl border border-white/5">
+        <div class="text-center flex-1 sm:flex-none">
+          <p class="text-[10px] sm:text-xs uppercase text-gray-400 font-semibold tracking-wider">Score</p>
+          <p id="hud-score" class="font-display font-extrabold text-xl sm:text-2xl text-neonCyan tracking-wide">0</p>
         </div>
         <div class="h-8 w-px bg-white/10"></div>
-        <!-- Current Streak -->
-        <div class="text-center">
-          <p class="text-xs uppercase text-gray-400 font-semibold tracking-wider">Série</p>
+        <div class="text-center flex-1 sm:flex-none">
+          <p class="text-[10px] sm:text-xs uppercase text-gray-400 font-semibold tracking-wider">Série</p>
           <div class="flex items-center justify-center space-x-1">
-            <span class="text-neonPink text-lg">🔥</span>
-            <span id="hud-streak" class="font-display font-bold text-xl text-neonPink">0</span>
+            <span class="text-neonPink text-base sm:text-lg">🔥</span>
+            <span id="hud-streak" class="font-display font-bold text-lg sm:text-xl text-neonPink">0</span>
           </div>
         </div>
         <div class="h-8 w-px bg-white/10"></div>
-        <!-- High Score -->
-        <div class="text-center">
-          <p class="text-xs uppercase text-gray-400 font-semibold tracking-wider">Record</p>
-          <p id="hud-highscore" class="font-display font-bold text-xl text-yellow-400">0</p>
+        <div class="text-center flex-1 sm:flex-none">
+          <p class="text-[10px] sm:text-xs uppercase text-gray-400 font-semibold tracking-wider">Record</p>
+          <p id="hud-highscore" class="font-display font-bold text-lg sm:text-xl text-yellow-400">0</p>
         </div>
       </div>
     </div>
   </header>
 
   <!-- Main Game Content -->
-  <main class="max-w-4xl mx-auto w-full flex-grow flex flex-col justify-center space-y-6">
+  <main class="max-w-4xl mx-auto w-full flex-grow flex flex-col justify-center space-y-4 sm:space-y-6">
 
     <!-- Toast Notification / Alert Feedback -->
-    <div id="toast-alert" class="hidden max-w-md mx-auto w-full p-4 rounded-xl text-center font-semibold shadow-lg transition-all transform duration-300">
+    <div id="toast-alert" class="hidden max-w-md mx-auto w-full p-3 sm:p-4 rounded-xl text-center text-sm font-semibold shadow-lg transition-all transform duration-300">
       <span id="toast-message"></span>
     </div>
 
-    <!-- Quote Card Container (User Story 1 & 6) -->
-    <div id="quote-card" class="glass-card rounded-3xl p-6 md:p-10 shadow-2xl relative overflow-hidden transition-all duration-500 border border-white/10">
-      
-      <!-- Decorative Neon Background Glow -->
+    <!-- Quote Card Container -->
+    <div id="quote-card" class="glass-card rounded-2xl sm:rounded-3xl p-4 sm:p-6 md:p-10 shadow-2xl relative overflow-hidden transition-all duration-500 border border-white/10">
+
       <div class="absolute -top-20 -right-20 w-40 h-40 bg-neonPink/20 rounded-full blur-3xl pointer-events-none"></div>
       <div class="absolute -bottom-20 -left-20 w-40 h-40 bg-neonCyan/20 rounded-full blur-3xl pointer-events-none"></div>
 
-      <div class="relative z-10 space-y-6">
-        
-        <!-- Category Badge & Counter -->
-        <div class="flex justify-between items-center text-xs text-gray-400">
-          <span class="bg-purple-900/60 text-purple-300 font-bold px-3 py-1 rounded-full border border-purple-500/30 tracking-wider uppercase">
-            🎵 Citation Musicale #<span id="quote-id">1</span>
+      <div class="relative z-10 space-y-4 sm:space-y-6">
+
+        <div class="flex justify-between items-center gap-2 text-[11px] sm:text-xs text-gray-400">
+          <span class="bg-purple-900/60 text-purple-300 font-bold px-2.5 sm:px-3 py-1 rounded-full border border-purple-500/30 tracking-wider uppercase truncate">
+            Citation #<span id="quote-id">1</span>
           </span>
-          <span class="text-gray-400">Progression : <strong id="quote-progress" class="text-white">1 / 15</strong></span>
+          <span class="shrink-0"><strong id="quote-progress" class="text-white">1 / 15</strong></span>
         </div>
 
-        <!-- Punchline Display Box (User Story 1) -->
-        <div class="bg-black/50 p-6 md:p-8 rounded-2xl border border-white/10 relative">
-          <span class="text-5xl text-neonPink font-serif absolute -top-3 left-4 opacity-50">“</span>
-          <p id="quote-text" class="text-xl md:text-2xl font-bold text-white text-center leading-relaxed tracking-wide my-2 italic">
+        <div class="bg-black/50 p-4 sm:p-6 md:p-8 rounded-2xl border border-white/10 relative">
+          <span class="text-4xl sm:text-5xl text-neonPink font-serif absolute -top-2 left-3 opacity-40">“</span>
+          <p id="quote-text" class="quote-mobile text-lg sm:text-xl md:text-2xl font-bold text-white text-center leading-relaxed my-1 sm:my-2 italic px-1">
             Chargement de la citation...
           </p>
-          <span class="text-5xl text-neonCyan font-serif absolute -bottom-8 right-4 opacity-50">”</span>
+          <span class="text-4xl sm:text-5xl text-neonCyan font-serif absolute -bottom-6 sm:-bottom-8 right-3 opacity-40">”</span>
         </div>
 
-        <!-- Answer Reveal Card (Hidden until solved or skipped) -->
-        <div id="answer-reveal-card" class="hidden bg-gradient-to-r from-emerald-950/80 to-teal-950/80 border border-emerald-500/50 p-4 rounded-xl text-center space-y-2 animate-bounce-subtle">
-          <p class="text-xs uppercase font-bold text-emerald-400 tracking-widest">Réponse Découverte</p>
-          <p class="text-lg font-extrabold text-white">
+        <div id="answer-reveal-card" class="hidden bg-gradient-to-r from-emerald-950/80 to-teal-950/80 border border-emerald-500/50 p-3 sm:p-4 rounded-xl text-center space-y-1 animate-bounce-subtle">
+          <p class="text-[10px] sm:text-xs uppercase font-bold text-emerald-400 tracking-widest">Réponse Découverte</p>
+          <p class="text-base sm:text-lg font-extrabold text-white break-words">
             <span id="reveal-artist" class="text-neonCyan"></span> — <span id="reveal-title" class="text-neonPink"></span>
           </p>
         </div>
 
-        <!-- Hint Display System (User Story 3) -->
         <div class="space-y-3">
-          <div class="flex items-center justify-between">
-            <p class="text-xs uppercase font-semibold text-gray-400 tracking-wider">Indices disponibles :</p>
-            <span class="text-xs text-yellow-400 font-medium">(-20 pts par indice)</span>
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-[11px] sm:text-xs uppercase font-semibold text-gray-400 tracking-wider">Indices</p>
+            <span class="text-[11px] sm:text-xs text-yellow-400 font-medium">-20 pts / indice</span>
           </div>
 
-          <!-- Hint Buttons -->
           <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 md:gap-3">
-            <button id="btn-hint-year" class="hint-btn bg-white/5 hover:bg-purple-900/40 border border-white/10 hover:border-purple-500 text-xs font-semibold py-2.5 px-3 rounded-xl transition flex items-center justify-center space-x-1.5">
+            <button id="btn-hint-year" class="tap hint-btn bg-white/5 active:bg-purple-900/40 border border-white/10 text-xs font-semibold px-2 rounded-xl transition flex items-center justify-center gap-1.5">
               <span>📅</span> <span>Année</span>
             </button>
-            <button id="btn-hint-genre" class="hint-btn bg-white/5 hover:bg-purple-900/40 border border-white/10 hover:border-purple-500 text-xs font-semibold py-2.5 px-3 rounded-xl transition flex items-center justify-center space-x-1.5">
+            <button id="btn-hint-genre" class="tap hint-btn bg-white/5 active:bg-purple-900/40 border border-white/10 text-xs font-semibold px-2 rounded-xl transition flex items-center justify-center gap-1.5">
               <span>🎵</span> <span>Genre</span>
             </button>
-            <button id="btn-hint-album" class="hint-btn bg-white/5 hover:bg-purple-900/40 border border-white/10 hover:border-purple-500 text-xs font-semibold py-2.5 px-3 rounded-xl transition flex items-center justify-center space-x-1.5">
+            <button id="btn-hint-album" class="tap hint-btn bg-white/5 active:bg-purple-900/40 border border-white/10 text-xs font-semibold px-2 rounded-xl transition flex items-center justify-center gap-1.5">
               <span>💿</span> <span>Album</span>
             </button>
-            <button id="btn-hint-initials" class="hint-btn bg-white/5 hover:bg-purple-900/40 border border-white/10 hover:border-purple-500 text-xs font-semibold py-2.5 px-3 rounded-xl transition flex items-center justify-center space-x-1.5">
+            <button id="btn-hint-initials" class="tap hint-btn bg-white/5 active:bg-purple-900/40 border border-white/10 text-xs font-semibold px-2 rounded-xl transition flex items-center justify-center gap-1.5">
               <span>🔤</span> <span>Initiales</span>
             </button>
           </div>
 
-          <!-- Revealed Hints Box -->
-          <div id="hints-display-box" class="hidden space-y-2 pt-2">
-            <div id="hint-tag-year" class="hidden bg-purple-950/70 border border-purple-500/40 text-purple-200 text-xs p-2.5 rounded-lg flex items-center">
-              <span class="font-bold mr-2">📅 Année de sortie :</span> <span id="hint-val-year"></span>
+          <div id="hints-display-box" class="hidden space-y-2 pt-1">
+            <div id="hint-tag-year" class="hidden bg-purple-950/70 border border-purple-500/40 text-purple-200 text-xs p-2.5 rounded-lg flex flex-wrap items-center gap-1">
+              <span class="font-bold">📅 Année :</span> <span id="hint-val-year"></span>
             </div>
-            <div id="hint-tag-genre" class="hidden bg-purple-950/70 border border-purple-500/40 text-purple-200 text-xs p-2.5 rounded-lg flex items-center">
-              <span class="font-bold mr-2">🎵 Genre musical :</span> <span id="hint-val-genre"></span>
+            <div id="hint-tag-genre" class="hidden bg-purple-950/70 border border-purple-500/40 text-purple-200 text-xs p-2.5 rounded-lg flex flex-wrap items-center gap-1">
+              <span class="font-bold">🎵 Genre :</span> <span id="hint-val-genre"></span>
             </div>
-            <div id="hint-tag-album" class="hidden bg-purple-950/70 border border-purple-500/40 text-purple-200 text-xs p-2.5 rounded-lg flex items-center">
-              <span class="font-bold mr-2">💿 Album / Projet :</span> <span id="hint-val-album"></span>
+            <div id="hint-tag-album" class="hidden bg-purple-950/70 border border-purple-500/40 text-purple-200 text-xs p-2.5 rounded-lg flex flex-wrap items-center gap-1">
+              <span class="font-bold">💿 Album :</span> <span id="hint-val-album"></span>
             </div>
-            <div id="hint-tag-initials" class="hidden bg-purple-950/70 border border-purple-500/40 text-purple-200 text-xs p-2.5 rounded-lg flex items-center">
-              <span class="font-bold mr-2">🔤 Initiales :</span> <span id="hint-val-initials"></span>
+            <div id="hint-tag-initials" class="hidden bg-purple-950/70 border border-purple-500/40 text-purple-200 text-xs p-2.5 rounded-lg flex flex-wrap items-center gap-1">
+              <span class="font-bold">🔤 Initiales :</span> <span id="hint-val-initials"></span>
             </div>
           </div>
         </div>
 
-        <!-- Answer Form Submission (User Story 2) -->
-        <form id="answer-form" class="space-y-4 pt-2">
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <form id="answer-form" class="space-y-3 sm:space-y-4 pt-1">
+          <!-- Classic free-text -->
+          <div id="classic-panel" class="grid grid-cols-1 gap-3 md:grid-cols-2">
             <div>
-              <label for="input-artist" class="block text-xs font-semibold text-gray-300 mb-1">Nom de l'Artiste / Groupe</label>
-              <input 
-                type="text" 
-                id="input-artist" 
-                placeholder="Ex: Ninho, PNL, Queen..." 
-                class="w-full bg-black/60 border border-white/15 focus:border-neonCyan focus:ring-1 focus:ring-neonCyan rounded-xl px-4 py-3 text-sm text-white placeholder-gray-500 outline-none transition"
+              <label for="input-artist" class="block text-xs font-semibold text-gray-300 mb-1.5">Artiste / Groupe</label>
+              <input
+                type="text"
+                id="input-artist"
+                placeholder="Ex: Ninho, PNL, Aicha Kamoise..."
+                enterkeyhint="next"
+                class="tap w-full bg-black/60 border border-white/15 focus:border-neonCyan focus:ring-1 focus:ring-neonCyan rounded-xl px-4 py-3 text-white placeholder-gray-500 outline-none transition"
                 autocomplete="off"
+                autocapitalize="words"
               >
             </div>
             <div>
-              <label for="input-title" class="block text-xs font-semibold text-gray-300 mb-1">Titre de la Chanson</label>
-              <input 
-                type="text" 
-                id="input-title" 
-                placeholder="Ex: Jefe, A l'ammoniaque..." 
-                class="w-full bg-black/60 border border-white/15 focus:border-neonPink focus:ring-1 focus:ring-neonPink rounded-xl px-4 py-3 text-sm text-white placeholder-gray-500 outline-none transition"
+              <label for="input-title" class="block text-xs font-semibold text-gray-300 mb-1.5">Titre / Moment</label>
+              <input
+                type="text"
+                id="input-title"
+                placeholder="Ex: Jefe, Devoir de commenter..."
+                enterkeyhint="go"
+                class="tap w-full bg-black/60 border border-white/15 focus:border-neonPink focus:ring-1 focus:ring-neonPink rounded-xl px-4 py-3 text-white placeholder-gray-500 outline-none transition"
                 autocomplete="off"
+                autocapitalize="sentences"
               >
             </div>
           </div>
 
-          <!-- Submit Button -->
-          <button 
-            type="submit" 
-            id="btn-submit"
-            class="w-full bg-gradient-to-r from-neonPink to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white font-bold py-3.5 px-6 rounded-xl shadow-lg shadow-neonPink/25 transition transform active:scale-95 flex items-center justify-center space-x-2"
-          >
-            <span>🎯 Valider ma réponse</span>
-          </button>
+          <!-- Easy quiz MCQ -->
+          <div id="quiz-panel" class="hidden space-y-4">
+            <div>
+              <p class="text-xs font-semibold text-gray-300 mb-2">Qui est derrière cette punchline ?</p>
+              <div id="quiz-artists" class="grid grid-cols-1 sm:grid-cols-2 gap-2"></div>
+            </div>
+            <div>
+              <p class="text-xs font-semibold text-gray-300 mb-2">Quel titre / moment ?</p>
+              <div id="quiz-titles" class="grid grid-cols-1 sm:grid-cols-2 gap-2"></div>
+            </div>
+          </div>
+
+          <div class="actions-sticky space-y-2">
+            <button
+              type="submit"
+              id="btn-submit"
+              class="tap w-full bg-gradient-to-r from-neonPink to-purple-600 active:from-pink-600 active:to-purple-700 text-white font-bold py-3.5 px-6 rounded-xl shadow-lg shadow-neonPink/25 transition transform active:scale-[0.98] flex items-center justify-center"
+            >
+              Valider ma réponse
+            </button>
+            <div class="flex flex-col sm:flex-row gap-2">
+              <button
+                type="button"
+                id="btn-next"
+                class="tap w-full sm:flex-1 bg-white/10 active:bg-white/20 text-white font-semibold text-sm px-4 rounded-xl transition border border-white/10"
+              >
+                Suivant / Passer
+              </button>
+              <button
+                type="button"
+                id="btn-reset"
+                class="tap w-full sm:w-auto bg-red-950/40 active:bg-red-900/60 text-red-300 font-semibold text-sm px-4 rounded-xl transition border border-red-500/30"
+              >
+                Reset
+              </button>
+            </div>
+          </div>
         </form>
-
-        <!-- Navigation & Game Controls (User Story 5) -->
-        <div class="flex flex-col sm:flex-row items-center justify-between pt-4 border-t border-white/10 gap-3">
-          <button 
-            type="button" 
-            id="btn-next" 
-            class="w-full sm:w-auto bg-white/10 hover:bg-white/20 text-white font-semibold text-xs py-2.5 px-5 rounded-xl transition flex items-center justify-center space-x-2 border border-white/10"
-          >
-            <span>⏩ Citation Suivante / Passer</span>
-          </button>
-
-          <button 
-            type="button" 
-            id="btn-reset" 
-            class="w-full sm:w-auto bg-red-950/40 hover:bg-red-900/60 text-red-300 font-semibold text-xs py-2.5 px-4 rounded-xl transition flex items-center justify-center space-x-1.5 border border-red-500/30"
-          >
-            <span>🔄 Réinitialiser la partie</span>
-          </button>
-        </div>
 
       </div>
     </div>
   </main>
 
-  <!-- Footer -->
-  <footer class="max-w-4xl mx-auto w-full mt-8 text-center text-xs text-gray-500">
-    <p>Music Refs v1.0.0 — ADA Task #4 Feature Delivery Branch <code class="text-purple-400">ada-feature-4</code></p>
+  <footer class="max-w-4xl mx-auto w-full mt-6 sm:mt-8 text-center text-[11px] sm:text-xs text-gray-500 space-y-1 pb-2">
+    <p>Music Refs · catégories & parties</p>
+    <p>
+      <a href="/party.html" class="text-neonPink hover:underline py-1 inline-block">Partie amis</a>
+      <span class="mx-1">·</span>
+      <a href="/admin.html" class="text-purple-400 hover:underline py-1 inline-block">Admin</a>
+    </p>
   </footer>
 
-  <!-- Reset Confirmation Modal -->
-  <div id="modal-reset" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-    <div class="glass-card max-w-sm w-full p-6 rounded-2xl space-y-4 border border-red-500/30 text-center">
+  <div id="modal-reset" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+    <div class="glass-card w-full sm:max-w-sm p-6 rounded-t-3xl sm:rounded-2xl space-y-4 border border-red-500/30 text-center pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+      <div class="mx-auto w-10 h-1 rounded-full bg-white/20 sm:hidden mb-2"></div>
       <div class="text-3xl text-red-400">⚠️</div>
       <h3 class="text-lg font-bold text-white">Réinitialiser la partie ?</h3>
-      <p class="text-xs text-gray-300">Votre score actuel et votre série en cours seront remis à zéro.</p>
-      <div class="flex space-x-3 pt-2">
-        <button id="modal-cancel-btn" class="w-1/2 bg-white/10 hover:bg-white/20 text-white font-semibold py-2 text-xs rounded-xl transition">
+      <p class="text-sm text-gray-300">Score et série remis à zéro.</p>
+      <div class="flex gap-3 pt-2">
+        <button id="modal-cancel-btn" class="tap w-1/2 bg-white/10 active:bg-white/20 text-white font-semibold text-sm rounded-xl transition">
           Annuler
         </button>
-        <button id="modal-confirm-btn" class="w-1/2 bg-red-600 hover:bg-red-700 text-white font-semibold py-2 text-xs rounded-xl transition">
+        <button id="modal-confirm-btn" class="tap w-1/2 bg-red-600 active:bg-red-700 text-white font-semibold text-sm rounded-xl transition">
           Confirmer
         </button>
       </div>
@@ -287,9 +362,10 @@
 
   <!-- Inline Application Logic -->
   <script type="module">
-    import { GameEngine } from './src/services/gameService.js';
+    import { GameEngine, loadQuotesFromApi, loadCategories, buildQuizChoices } from './src/services/gameService.js';
 
-    const game = new GameEngine();
+    const game = new GameEngine([]);
+    let quizPick = { artist: null, title: null };
 
     // DOM Elements
     const hudScore = document.getElementById('hud-score');
@@ -322,6 +398,11 @@
     const answerForm = document.getElementById('answer-form');
     const inputArtist = document.getElementById('input-artist');
     const inputTitle = document.getElementById('input-title');
+    const classicPanel = document.getElementById('classic-panel');
+    const quizPanel = document.getElementById('quiz-panel');
+    const quizArtists = document.getElementById('quiz-artists');
+    const quizTitles = document.getElementById('quiz-titles');
+    const soloMode = document.getElementById('solo-mode');
     const btnSubmit = document.getElementById('btn-submit');
     const btnNext = document.getElementById('btn-next');
     const btnReset = document.getElementById('btn-reset');
@@ -332,6 +413,57 @@
     const modalReset = document.getElementById('modal-reset');
     const modalCancelBtn = document.getElementById('modal-cancel-btn');
     const modalConfirmBtn = document.getElementById('modal-confirm-btn');
+
+    function isEasyMode() {
+      return soloMode && soloMode.value === 'easy';
+    }
+
+    function applyAnswerPanels() {
+      const easy = isEasyMode();
+      if (classicPanel) classicPanel.classList.toggle('hidden', easy);
+      if (quizPanel) quizPanel.classList.toggle('hidden', !easy);
+      if (btnSubmit) {
+        btnSubmit.textContent = easy ? 'Valider le quiz' : 'Valider ma réponse';
+      }
+    }
+
+    function choiceBtnClass(selected) {
+      return `tap w-full text-left rounded-xl border px-3 py-3 text-sm transition ${
+        selected
+          ? 'border-neonCyan bg-neonCyan/20 text-white'
+          : 'border-white/15 bg-black/40 text-slate-200 active:bg-white/10'
+      }`;
+    }
+
+    function paintQuizChoices() {
+      if (!isEasyMode() || !game.currentQuote) return;
+      const choices = buildQuizChoices(game.currentQuote, game.quotes, 4);
+      quizPick = { artist: null, title: null };
+
+      function fill(box, options, field) {
+        box.innerHTML = '';
+        options.forEach((label) => {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.textContent = label;
+          btn.className = choiceBtnClass(false);
+          btn.addEventListener('click', () => {
+            if (btnSubmit.disabled) return;
+            quizPick[field] = label;
+            [...box.children].forEach((el) => {
+              el.className = choiceBtnClass(el.textContent === label);
+            });
+            if (quizPick.artist && quizPick.title) {
+              answerForm.requestSubmit();
+            }
+          });
+          box.appendChild(btn);
+        });
+      }
+
+      fill(quizArtists, choices.artists, 'artist');
+      fill(quizTitles, choices.titles, 'title');
+    }
 
     // Render HUD
     function updateHUD() {
@@ -358,6 +490,9 @@
       inputArtist.disabled = false;
       inputTitle.disabled = false;
       btnSubmit.disabled = false;
+
+      applyAnswerPanels();
+      paintQuizChoices();
 
       // Reset hint buttons state & displays
       hintsDisplayBox.classList.add('hidden');
@@ -404,11 +539,24 @@
     // Form Submit (Answer Validation)
     answerForm.addEventListener('submit', (e) => {
       e.preventDefault();
-      const valArtist = inputArtist.value.trim();
-      const valTitle = inputTitle.value.trim();
+      const valArtist = isEasyMode()
+        ? (quizPick.artist || '').trim()
+        : inputArtist.value.trim();
+      const valTitle = isEasyMode()
+        ? (quizPick.title || '').trim()
+        : inputTitle.value.trim();
 
       if (!valArtist && !valTitle) {
-        showToast("Veuillez saisir au moins le nom de l'artiste ou le titre de la chanson.", false);
+        showToast(
+          isEasyMode()
+            ? 'Choisis un artiste et un titre parmi les propositions.'
+            : "Veuillez saisir au moins le nom de l'artiste ou le titre de la chanson.",
+          false
+        );
+        return;
+      }
+      if (isEasyMode() && (!valArtist || !valTitle)) {
+        showToast('Choisis les deux réponses (artiste + titre).', false);
         return;
       }
 
@@ -426,6 +574,10 @@
           revealTitle.textContent = game.currentQuote.title;
           answerRevealCard.classList.remove('hidden');
           btnSubmit.disabled = true;
+          if (isEasyMode()) {
+            quizArtists.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+            quizTitles.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+          }
         }
       } else {
         showToast(`❌ ${res.message}`, false);
@@ -474,8 +626,46 @@
       }
     });
 
-    // Initialize Game on Load
-    renderCurrentQuote();
+    // Initialize Game on Load (API first, static fallback)
+    const soloCategory = document.getElementById('solo-category');
+
+    async function bootSolo(categoryId = null) {
+      const quotes = await loadQuotesFromApi('', categoryId || null);
+      game.setQuotes(quotes);
+      renderCurrentQuote();
+      showToast(categoryId ? `Catégorie chargée (${quotes.length} punchlines)` : `Toutes les punchlines (${quotes.length})`, true);
+    }
+
+    (async () => {
+      try {
+        const cats = await loadCategories('');
+        cats.forEach((c) => {
+          const opt = document.createElement('option');
+          opt.value = c.id;
+          opt.textContent = `${c.name} (${c.quote_count})`;
+          soloCategory.appendChild(opt);
+        });
+      } catch (e) {
+        console.warn(e);
+      }
+      await bootSolo(null);
+    })();
+
+    soloCategory.addEventListener('change', () => {
+      const val = soloCategory.value;
+      bootSolo(val ? Number(val) : null);
+    });
+
+    soloMode.addEventListener('change', () => {
+      applyAnswerPanels();
+      paintQuizChoices();
+      showToast(
+        isEasyMode()
+          ? 'Mode Facile : choisis parmi 4 propositions'
+          : 'Mode Normal : saisie libre',
+        true
+      );
+    });
   </script>
 </body>
 </html>

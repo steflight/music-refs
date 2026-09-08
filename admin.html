@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="fr" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Music Refs — Admin</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&family=Orbitron:wght@700&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Montserrat', 'sans-serif'], display: ['Orbitron', 'sans-serif'] },
+          colors: { neonPink: '#ff007f', neonCyan: '#00f0ff', darkBg: '#0b0f19', cardBg: '#151c2e' }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="min-h-screen bg-[#0b0f19] text-slate-200 font-sans p-4 md:p-8">
+  <div class="max-w-4xl mx-auto space-y-6">
+    <header class="flex items-center justify-between gap-4 flex-wrap">
+      <div>
+        <h1 class="font-display text-2xl text-transparent bg-clip-text bg-gradient-to-r from-neonPink to-neonCyan">MUSIC REFS ADMIN</h1>
+        <p class="text-xs text-slate-400">Catalogue (réponses) · Import LRCLIB · voir ACCES-ET-PROCEDURES.md</p>
+      </div>
+      <div class="flex gap-3 text-sm">
+        <a href="/party.html" class="text-neonPink hover:underline">Partie amis</a>
+        <a href="/" class="text-neonCyan hover:underline">← Jeu</a>
+        <a href="/docs" class="text-purple-300 hover:underline">Swagger</a>
+      </div>
+    </header>
+
+    <section class="bg-cardBg/80 border border-white/10 rounded-2xl p-5 space-y-3">
+      <label class="block text-xs text-slate-400">Token admin (X-Admin-Token) — requis pour import / catégories / suppression
+        <input id="token" type="password" class="mt-1 w-full rounded-xl bg-black/40 border border-white/10 px-3 py-2 text-sm" placeholder="ADMIN_TOKEN" />
+      </label>
+    </section>
+
+    <!-- Catégories -->
+    <section class="bg-cardBg/80 border border-white/10 rounded-2xl p-5 space-y-4">
+      <div class="flex items-center justify-between gap-3 flex-wrap">
+        <h2 class="font-semibold text-sm text-white">Catégories</h2>
+        <button id="btn-cat-refresh" type="button" class="text-xs px-3 py-1.5 rounded-lg border border-white/15 hover:bg-white/5">Rafraîchir</button>
+      </div>
+      <div class="grid sm:grid-cols-3 gap-2">
+        <input id="cat-name" class="rounded-xl bg-black/40 border border-white/10 px-3 py-2 text-sm sm:col-span-2" placeholder="Nom (ex. Rap français)" />
+        <button id="btn-cat-create" class="bg-neonCyan/20 border border-neonCyan/40 text-neonCyan text-sm font-semibold rounded-xl">Créer</button>
+      </div>
+      <p id="cat-status" class="text-xs text-slate-500"></p>
+      <div id="cat-list" class="space-y-2"></div>
+      <div class="border-t border-white/10 pt-4 space-y-2">
+        <p class="text-xs text-slate-400">Rattacher des punchlines à une catégorie</p>
+        <div class="grid sm:grid-cols-2 gap-2">
+          <select id="cat-assign-select" class="rounded-xl bg-black/40 border border-white/10 px-3 py-2 text-sm"></select>
+          <button id="btn-cat-assign" class="text-sm font-semibold rounded-xl border border-white/15 hover:bg-white/5">Assigner les IDs cochés ci-dessous</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Catalogue : punchlines + réponses (artiste / titre) -->
+    <section class="bg-cardBg/80 border border-white/10 rounded-2xl p-5 space-y-4">
+      <div class="flex items-center justify-between gap-3 flex-wrap">
+        <h2 class="font-semibold text-sm text-white">Catalogue des punchlines (réponses)</h2>
+        <button id="btn-refresh" type="button" class="text-xs px-3 py-1.5 rounded-lg border border-white/15 hover:bg-white/5">
+          Rafraîchir
+        </button>
+      </div>
+      <p id="catalog-meta" class="text-xs text-slate-500">—</p>
+      <div id="catalog" class="max-h-[480px] overflow-y-auto space-y-2"></div>
+    </section>
+
+    <!-- Import -->
+    <section class="bg-cardBg/80 border border-white/10 rounded-2xl p-5 space-y-4">
+      <h2 class="font-semibold text-sm text-white">Import paroles (artiste + titre)</h2>
+      <div class="grid sm:grid-cols-2 gap-3">
+        <label class="block text-xs text-slate-400">Artiste
+          <input id="artist" class="mt-1 w-full rounded-xl bg-black/40 border border-white/10 px-3 py-2 text-sm" placeholder="Damso" />
+        </label>
+        <label class="block text-xs text-slate-400">Titre
+          <input id="title" class="mt-1 w-full rounded-xl bg-black/40 border border-white/10 px-3 py-2 text-sm" placeholder="Macarena" />
+        </label>
+      </div>
+      <button id="btn-import" class="w-full sm:w-auto bg-gradient-to-r from-neonPink to-purple-600 font-semibold text-sm px-5 py-2.5 rounded-xl">
+        Importer les paroles
+      </button>
+      <p id="status" class="text-xs text-slate-400"></p>
+    </section>
+
+    <section id="result" class="hidden bg-cardBg/80 border border-white/10 rounded-2xl p-5 space-y-4">
+      <div id="meta" class="text-sm space-y-1"></div>
+      <div id="lines" class="max-h-[420px] overflow-y-auto space-y-2 border border-white/5 rounded-xl p-3"></div>
+      <button id="btn-save" class="w-full sm:w-auto bg-neonCyan/20 border border-neonCyan/40 text-neonCyan font-semibold text-sm px-5 py-2.5 rounded-xl">
+        Enregistrer les lignes cochées
+      </button>
+    </section>
+  </div>
+
+  <script type="module">
+    const $ = (id) => document.getElementById(id);
+    let importPayload = null;
+    let categoriesCache = [];
+
+    const tokenInput = $('token');
+    tokenInput.value = localStorage.getItem('music_refs_admin_token') || '';
+    tokenInput.addEventListener('change', () => {
+      localStorage.setItem('music_refs_admin_token', tokenInput.value);
+    });
+
+    function escapeHtml(s) {
+      return String(s ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function headers() {
+      return {
+        'Content-Type': 'application/json',
+        'X-Admin-Token': tokenInput.value.trim(),
+      };
+    }
+
+    async function loadCategories() {
+      const res = await fetch('/api/music-refs/categories');
+      categoriesCache = await res.json();
+      const list = $('cat-list');
+      const sel = $('cat-assign-select');
+      list.innerHTML = '';
+      sel.innerHTML = '';
+      categoriesCache.forEach((c) => {
+        const row = document.createElement('div');
+        row.className = 'flex items-center justify-between gap-2 rounded-lg border border-white/10 px-3 py-2 text-sm';
+        row.innerHTML = `<span><strong>${escapeHtml(c.name)}</strong> <span class="text-slate-500">(${c.quote_count} titres)</span></span>
+          <button type="button" data-cat-del="${c.id}" class="text-[11px] text-red-300 border border-red-500/30 rounded-lg px-2 py-1">Suppr.</button>`;
+        list.appendChild(row);
+        const opt = document.createElement('option');
+        opt.value = c.id;
+        opt.textContent = `${c.name} (${c.quote_count})`;
+        sel.appendChild(opt);
+      });
+      list.querySelectorAll('[data-cat-del]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          if (!confirm('Supprimer cette catégorie ?')) return;
+          const res = await fetch(`/api/music-refs/categories/${btn.dataset.catDel}`, { method: 'DELETE', headers: headers() });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) { $('cat-status').textContent = data.detail || 'Erreur'; return; }
+          $('cat-status').textContent = 'Catégorie supprimée.';
+          await loadCategories();
+          await loadCatalog();
+        });
+      });
+    }
+
+    async function loadCatalog() {
+      const box = $('catalog');
+      $('catalog-meta').textContent = 'Chargement…';
+      try {
+        const res = await fetch('/api/music-refs/quotes', { headers: { Accept: 'application/json' } });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || JSON.stringify(data));
+        $('catalog-meta').textContent = `${data.length} punchline(s) — coche pour assigner à une catégorie`;
+        box.innerHTML = '';
+        if (!data.length) {
+          box.innerHTML = '<p class="text-xs text-slate-500">Aucune punchline en base.</p>';
+          return;
+        }
+        const catMap = Object.fromEntries(categoriesCache.map((c) => [c.id, c.name]));
+        data.forEach((q) => {
+          const row = document.createElement('div');
+          row.className = 'rounded-xl border border-white/10 bg-black/20 p-3 space-y-2';
+          const hints = q.hints || {};
+          const catNames = (q.category_ids || []).map((id) => catMap[id] || id).join(', ') || '—';
+          row.innerHTML = `
+            <div class="flex items-start justify-between gap-3">
+              <label class="flex items-start gap-2 min-w-0">
+                <input type="checkbox" class="mt-1 assign-quote" value="${q.id}" />
+                <div class="space-y-1">
+                  <p class="text-[10px] uppercase tracking-wide text-slate-500">#${q.id} · Question</p>
+                  <p class="text-sm text-slate-100">« ${escapeHtml(q.quote)} »</p>
+                  <p class="text-xs text-neonCyan"><span class="text-slate-500">Réponse :</span> <strong>${escapeHtml(q.artist)}</strong> — ${escapeHtml(q.title)}</p>
+                  <p class="text-[11px] text-slate-500">${escapeHtml(hints.album || '—')} · ${escapeHtml(hints.year || '—')}</p>
+                  <p class="text-[11px] text-purple-300">Catégories : ${escapeHtml(catNames)}</p>
+                </div>
+              </label>
+              <button type="button" data-del="${q.id}"
+                class="shrink-0 text-[11px] px-2.5 py-1.5 rounded-lg border border-red-500/40 text-red-300 hover:bg-red-950/40">
+                Supprimer
+              </button>
+            </div>
+          `;
+          box.appendChild(row);
+        });
+        box.querySelectorAll('[data-del]').forEach((btn) => {
+          btn.addEventListener('click', () => deleteQuote(Number(btn.getAttribute('data-del'))));
+        });
+      } catch (err) {
+        $('catalog-meta').textContent = 'Erreur: ' + err.message;
+        box.innerHTML = '';
+      }
+    }
+
+    async function deleteQuote(id) {
+      if (!tokenInput.value.trim()) {
+        $('status').textContent = 'Token admin requis pour supprimer.';
+        return;
+      }
+      if (!confirm(`Supprimer la punchline #${id} ?`)) return;
+      try {
+        const res = await fetch(`/api/music-refs/quotes/${id}`, {
+          method: 'DELETE',
+          headers: headers(),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || JSON.stringify(data));
+        $('status').textContent = `Punchline #${id} supprimée.`;
+        await loadCategories();
+        await loadCatalog();
+      } catch (err) {
+        $('status').textContent = 'Erreur: ' + err.message;
+      }
+    }
+
+    $('btn-refresh').addEventListener('click', async () => { await loadCategories(); await loadCatalog(); });
+    $('btn-cat-refresh').addEventListener('click', loadCategories);
+
+    $('btn-cat-create').addEventListener('click', async () => {
+      const name = $('cat-name').value.trim();
+      if (!name) return;
+      try {
+        const res = await fetch('/api/music-refs/categories', {
+          method: 'POST',
+          headers: headers(),
+          body: JSON.stringify({ name }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || JSON.stringify(data));
+        $('cat-name').value = '';
+        $('cat-status').textContent = `Créée : ${data.name}`;
+        await loadCategories();
+      } catch (err) {
+        $('cat-status').textContent = 'Erreur: ' + err.message;
+      }
+    });
+
+    $('btn-cat-assign').addEventListener('click', async () => {
+      const categoryId = Number($('cat-assign-select').value);
+      const quoteIds = [...document.querySelectorAll('.assign-quote:checked')].map((el) => Number(el.value));
+      if (!quoteIds.length) {
+        $('cat-status').textContent = 'Cochez des punchlines dans le catalogue.';
+        return;
+      }
+      try {
+        const res = await fetch(`/api/music-refs/categories/${categoryId}/quotes`, {
+          method: 'POST',
+          headers: headers(),
+          body: JSON.stringify({ quote_ids: quoteIds }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || JSON.stringify(data));
+        $('cat-status').textContent = `${data.assigned} titre(s) assigné(s).`;
+        await loadCategories();
+        await loadCatalog();
+      } catch (err) {
+        $('cat-status').textContent = 'Erreur: ' + err.message;
+      }
+    });
+
+    $('btn-import').addEventListener('click', async () => {
+      const artist = $('artist').value.trim();
+      const title = $('title').value.trim();
+      $('status').textContent = 'Recherche LRCLIB + métadonnées…';
+      $('result').classList.add('hidden');
+      try {
+        const res = await fetch('/api/music-refs/import', {
+          method: 'POST',
+          headers: headers(),
+          body: JSON.stringify({ artist, title }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || JSON.stringify(data));
+        importPayload = data;
+        $('meta').innerHTML = `
+          <p><strong>${escapeHtml(data.track.artistName)}</strong> — ${escapeHtml(data.track.trackName)}</p>
+          <p class="text-xs text-slate-400">Album: ${escapeHtml(data.hints.album || '—')} · ${escapeHtml(data.hints.year || '—')} · ${escapeHtml(data.hints.genre || '—')}</p>
+          <p class="text-xs text-slate-500">${data.lyrics_lines.length} lignes</p>
+        `;
+        const box = $('lines');
+        box.innerHTML = '';
+        data.lyrics_lines.forEach((line, i) => {
+          const row = document.createElement('label');
+          row.className = 'flex items-start gap-2 text-sm p-2 rounded-lg hover:bg-white/5 cursor-pointer';
+          row.innerHTML = `
+            <input type="checkbox" data-idx="${i}" class="mt-1" />
+            <span>${escapeHtml(line.text)}</span>
+          `;
+          box.appendChild(row);
+        });
+        $('result').classList.remove('hidden');
+        $('status').textContent = 'Sélectionnez les punchlines à garder.';
+      } catch (err) {
+        $('status').textContent = 'Erreur: ' + err.message;
+      }
+    });
+
+    $('btn-save').addEventListener('click', async () => {
+      if (!importPayload) return;
+      const checked = [...document.querySelectorAll('#lines input[type=checkbox]:checked')];
+      if (!checked.length) {
+        $('status').textContent = 'Cochez au moins une ligne.';
+        return;
+      }
+      const quotes = checked.map((el) => {
+        const line = importPayload.lyrics_lines[Number(el.dataset.idx)];
+        return {
+          quote: line.text,
+          artist: importPayload.track.artistName,
+          title: importPayload.track.trackName,
+          hints: importPayload.hints,
+        };
+      });
+      try {
+        const res = await fetch('/api/music-refs/quotes', {
+          method: 'POST',
+          headers: headers(),
+          body: JSON.stringify({ quotes }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || JSON.stringify(data));
+        $('status').textContent = `${data.length} punchline(s) enregistrée(s).`;
+        await loadCategories();
+        await loadCatalog();
+      } catch (err) {
+        $('status').textContent = 'Erreur: ' + err.message;
+      }
+    });
+
+    await loadCategories();
+    await loadCatalog();
+  </script>
+</body>
+</html>

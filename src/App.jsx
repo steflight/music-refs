@@ -1,21 +1,34 @@
-import React, { useState } from 'react';
-import { GameEngine } from './services/gameService.js';
+import React, { useEffect, useState } from 'react';
+import { GameEngine, loadQuotesFromApi } from './services/gameService.js';
 import ScoreBoard from './components/ScoreBoard.jsx';
 import QuoteCard from './components/QuoteCard.jsx';
 import HintSystem from './components/HintSystem.jsx';
 import AnswerForm from './components/AnswerForm.jsx';
 import GameControls from './components/GameControls.jsx';
 
-const game = new GameEngine();
+const game = new GameEngine([]);
 
 export const App = () => {
-  const [quote, setQuote] = useState(game.currentQuote);
+  const [ready, setReady] = useState(false);
+  const [quote, setQuote] = useState(null);
   const [score, setScore] = useState(game.score);
   const [streak, setStreak] = useState(game.streak);
   const [highScore, setHighScore] = useState(game.highScore);
   const [revealedHints, setRevealedHints] = useState(new Set());
   const [isRevealed, setIsRevealed] = useState(false);
   const [toast, setToast] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const quotes = await loadQuotesFromApi('');
+      if (cancelled) return;
+      game.setQuotes(quotes);
+      setQuote(game.currentQuote);
+      setReady(true);
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const showNotification = (msg, success = true) => {
     setToast({ msg, success });
@@ -68,6 +81,14 @@ export const App = () => {
     setIsRevealed(false);
     showNotification('Partie réinitialisée !', true);
   };
+
+  if (!ready || !quote) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 p-8 flex items-center justify-center">
+        <p className="text-sm text-slate-400">Chargement des punchlines…</p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 p-4 md:p-8 flex flex-col justify-between font-sans">

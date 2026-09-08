@@ -4,6 +4,77 @@ const STORAGE_KEY_SCORE = 'music_refs_high_score';
 const STORAGE_KEY_STATS = 'music_refs_stats';
 
 /**
+ * Load quotes from API; fall back to static MUSIC_QUOTES if unavailable.
+ */
+export async function loadQuotesFromApi(apiBase = '', categoryId = null) {
+  try {
+    const qs = categoryId != null ? `?category_id=${encodeURIComponent(categoryId)}` : '';
+    const res = await fetch(`${apiBase}/api/music-refs/quotes${qs}`, {
+      headers: { Accept: 'application/json' },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (Array.isArray(data) && data.length > 0) {
+      return data;
+    }
+  } catch (err) {
+    console.warn('Music Refs API unavailable, using static quotes:', err);
+  }
+  return MUSIC_QUOTES;
+}
+
+export async function loadCategories(apiBase = '') {
+  const res = await fetch(`${apiBase}/api/music-refs/categories`, {
+    headers: { Accept: 'application/json' },
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+/**
+ * Build multiple-choice options for easy/quiz mode.
+ * Returns { artists: string[], titles: string[] } (correct answer included, shuffled).
+ */
+export function buildQuizChoices(currentQuote, pool, count = 4) {
+  if (!currentQuote) return { artists: [], titles: [] };
+  const others = (pool || []).filter((q) => q && q.id !== currentQuote.id);
+
+  function pickField(field, correct) {
+    const uniq = new Set();
+    const correctNorm = normalizeString(correct);
+    const options = [correct];
+    uniq.add(correctNorm);
+    const shuffled = [...others].sort(() => Math.random() - 0.5);
+    for (const q of shuffled) {
+      const val = (q[field] || '').trim();
+      if (!val) continue;
+      const n = normalizeString(val);
+      if (uniq.has(n)) continue;
+      uniq.add(n);
+      options.push(val);
+      if (options.length >= count) break;
+    }
+    // Pad with generic distractors if pool too small
+    const fillers = field === 'artist'
+      ? ['Artiste Mystère', 'Inconnu·e', 'Anonymous', 'DJ X']
+      : ['Sans titre', 'Track #1', 'Bonus', 'Interlude'];
+    for (const f of fillers) {
+      if (options.length >= count) break;
+      const n = normalizeString(f);
+      if (uniq.has(n)) continue;
+      uniq.add(n);
+      options.push(f);
+    }
+    return options.sort(() => Math.random() - 0.5);
+  }
+
+  return {
+    artists: pickField('artist', currentQuote.artist),
+    titles: pickField('title', currentQuote.title),
+  };
+}
+
+/**
  * Strips accents, punctuation, and converts string to lower-case for flexible comparison.
  */
 export function normalizeString(str) {
@@ -70,8 +141,61 @@ export class GameEngine {
     this.titleGuessed = false;
     this.totalAttempts = 0;
     this.successfulQuotes = 0;
+    this.orderedMode = false;
+    this.orderIndex = 0;
 
+    if (this.quotes.length > 0) {
+      this.selectRandomQuote();
+    }
+  }
+
+  /**
+   * Replace quote pool (e.g. after API load) and pick a fresh quote.
+   * @param {object} [opts]
+   * @param {boolean} [opts.ordered] play in list order (party mode)
+   */
+  setQuotes(quotesList, opts = {}) {
+    this.quotes = Array.isArray(quotesList) && quotesList.length ? [...quotesList] : [...MUSIC_QUOTES];
+    this.playedIds.clear();
+    this.orderedMode = !!opts.ordered;
+    this.orderIndex = 0;
+    if (this.orderedMode) {
+      return this.selectOrderedQuote(0);
+    }
     this.selectRandomQuote();
+    return this.currentQuote;
+  }
+
+  selectOrderedQuote(index = 0) {
+    this.revealedHints.clear();
+    this.artistGuessed = false;
+    this.titleGuessed = false;
+    if (!this.quotes.length) {
+      this.currentQuote = null;
+      return null;
+    }
+    this.orderIndex = Math.max(0, Math.min(index, this.quotes.length - 1));
+    this.currentQuote = this.quotes[this.orderIndex];
+    this.playedIds.add(this.currentQuote.id);
+    return this.currentQuote;
+  }
+
+  /**
+   * Next quote in party order. Returns null when finished.
+   */
+  advanceOrdered() {
+    if (!this.orderedMode) {
+      return this.selectRandomQuote();
+    }
+    if (this.orderIndex >= this.quotes.length - 1) {
+      return null;
+    }
+    return this.selectOrderedQuote(this.orderIndex + 1);
+  }
+
+  isPartyComplete() {
+    return this.orderedMode && this.orderIndex >= this.quotes.length - 1
+      && this.artistGuessed && this.titleGuessed;
   }
 
   getStoredHighScore() {
