@@ -1,0 +1,132 @@
+from pathlib import Path
+
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+
+from config import get_settings
+from db import init_db, seed_from_json
+from routes.categories import router as categories_router
+from routes.parties import router as parties_router
+from routes.quotes import router as quotes_router
+
+AVAILABLE_ENDPOINTS = [
+    "GET /",
+    "GET /health",
+    "GET /docs",
+    "GET /api/music-refs/quotes",
+    "GET /api/music-refs/random",
+    "GET /api/music-refs/categories",
+    "POST /api/music-refs/parties",
+    "POST /api/music-refs/parties/join",
+    "POST /api/music-refs/import",
+    "POST /api/music-refs/quotes",
+    "DELETE /api/music-refs/quotes/{id}",
+]
+
+app = FastAPI(
+    title="Music Refs API",
+    description="Punchlines, catégories & parties entre amis",
+    version="1.2.0",
+)
+
+settings = get_settings()
+origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins if origins != ["*"] else ["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(quotes_router)
+app.include_router(categories_router)
+app.include_router(parties_router)
+
+
+def frontend_root() -> Path:
+    candidates = [
+        Path("/frontend"),
+        Path(__file__).resolve().parent.parent,
+        Path("/workspace/music-refs"),
+    ]
+    for root in candidates:
+        if (root / "index.html").exists():
+            return root
+    return Path("/frontend")
+
+
+FRONT = frontend_root()
+
+
+@app.on_event("startup")
+def on_startup() -> None:
+    init_db()
+    seed_path = Path(__file__).resolve().parent / "seed_quotes.json"
+    seed_from_json(seed_path)
+
+
+@app.get("/health")
+def health() -> dict:
+    return {"status": "ok", "service": "Music Refs API", "version": "1.2.0"}
+
+
+@app.get("/")
+async def root(request: Request):
+    accept = (request.headers.get("accept") or "").lower()
+    wants_json = "application/json" in accept and "text/html" not in accept
+    if wants_json:
+        return JSONResponse({"status": "ok", "service": "Music Refs API", "version": "1.2.0"})
+    index = FRONT / "index.html"
+    if index.exists():
+        return HTMLResponse(index.read_text(encoding="utf-8"))
+    return JSONResponse({"status": "ok", "service": "Music Refs API"})
+
+
+@app.get("/admin.html")
+async def admin_page():
+    page = FRONT / "admin.html"
+    if page.exists():
+        return FileResponse(page)
+    return JSONResponse(
+        {"error": "Not Found", "status_code": 404, "available_endpoints": AVAILABLE_ENDPOINTS},
+        status_code=404,
+    )
+
+
+@app.get("/party.html")
+async def party_page():
+    page = FRONT / "party.html"
+    if page.exists():
+        return FileResponse(page)
+    return JSONResponse(
+        {"error": "Not Found", "status_code": 404, "available_endpoints": AVAILABLE_ENDPOINTS},
+        status_code=404,
+    )
+
+
+@app.exception_handler(404)
+async def not_found_handler(request: Request, exc):  # noqa: ARG001
+    accept = (request.headers.get("accept") or "").lower()
+    if "text/html" in accept:
+        page = FRONT / "404.html"
+        if page.exists():
+            return HTMLResponse(page.read_text(encoding="utf-8"), status_code=404)
+        return HTMLResponse(
+            "<h1>404</h1><p>Oups ! Fausse Note</p><p><a href='/'>Accueil</a></p>",
+            status_code=404,
+        )
+    return JSONResponse(
+        {
+            "error": "Not Found",
+            "status_code": 404,
+            "available_endpoints": AVAILABLE_ENDPOINTS,
+        },
+        status_code=404,
+    )
+
+
+if (FRONT / "src").is_dir():
+    app.mount("/src", StaticFiles(directory=str(FRONT / "src")), name="src")

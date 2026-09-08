@@ -1,0 +1,24 @@
+services:
+  music-refs-api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: music-refs-api
+    ports:
+      - "8084:8084"
+    volumes:
+      - ./backend/data:/app/data
+      - ./:/frontend:ro
+    env_file:
+      - .env
+    environment:
+      - DATABASE_PATH=/app/data/quotes.db
+      - ADMIN_TOKEN=${ADMIN_TOKEN}
+    networks:
+      - proxy
+    restart: always
+
+networks:
+  proxy:
+    name: nginx-proxy-manager_default
+    external: true
