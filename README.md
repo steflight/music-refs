@@ -1,46 +1,101 @@
-# Music Refs - Le Jeu des Punchlines & Citations (Task #6)
+# Music Refs — Jeu des Punchlines & Citations
 
-**Music Refs** est une application web moderne et interactive permettant aux passionnés de musique de deviner des artistes et des chansons à partir de citations et punchlines tirées au sort.
+Application web : deviner artiste + titre à partir d’une punchline.
 
----
+**Domaine** : `music-refs-dev.kladriva.ca`  
+**API / frontend** : port hôte **8084** (conteneur `music-refs-api`)  
+**ADA** reste sur **8082** — ne pas confondre.
 
-## 🎯 User Stories Implémentées (Task #6 - SSL/TLS, Reverse Proxy SNI & Surveillance)
+## Démarrage
 
-### 1. Provisionnement et Configuration de Certificat SSL/TLS pour le Sous-Domaine
-- **Fichiers** : [`certs/music-refs-dev.kladriva.ca.crt`](certs/music-refs-dev.kladriva.ca.crt), [`certs/music-refs-dev.kladriva.ca.key`](certs/music-refs-dev.kladriva.ca.key), [`scripts/cert_manager.py`](scripts/cert_manager.py)
-- **Description** :
-  - Génération et provisionnement de certificats SSL/TLS RSA 2048-bit avec extension SAN (Subject Alternative Name) pour `music-refs-dev.kladriva.ca`.
-  - Résout le problème `ERR_SSL_UNRECOGNIZED_NAME_ALERT` en garantissant un handshake TLS valide.
+```bash
+cd /home/steflight/qa-environment/music-refs
+cp .env.example .env   # si besoin, puis définir ADMIN_TOKEN
+docker compose up -d --build
+```
 
-### 2. Configuration Reverse Proxy SNI & Hôtes Virtuels
-- **Fichiers** : [`nginx.conf`](nginx.conf)
-- **Description** :
-  - Mis à jour pour supporter la gestion SNI sur le port 443 avec HTTP/2.
-  - Redirection automatique HTTP (80) vers HTTPS (443).
-  - Protocoles sécurisés activés : `TLSv1.2` et `TLSv1.3`.
-  - En-têtes de sécurité HSTS (`Strict-Transport-Security`), `X-Frame-Options`, `X-Content-Type-Options`.
+Preuves :
 
-### 3. Gestion Automatisée et Renouvellement des Certificats SSL
-- **Fichiers** : [`scripts/cert_manager.py`](scripts/cert_manager.py)
-- **Description** :
-  - Script automatisé pour vérifier l'expiration du certificat et déclencher le renouvellement automatique lorsque l'échéance est inférieure au seuil (ex: 30 jours) ou sur demande force (`--force`).
+```bash
+curl -sS http://127.0.0.1:8084/health
+curl -sS http://127.0.0.1:8084/api/music-refs/quotes | head
+```
 
-### 4. Surveillance des Handshakes SSL/TLS et de la Santé du Domaine
-- **Fichiers** : [`scripts/ssl_monitor.py`](scripts/ssl_monitor.py)
-- **Description** :
-  - Script de surveillance qui effectue un test de handshake TLS réel avec SNI, vérifie la chaîne de certificats, contrôle la disponibilité de l'endpoint d'API (`/health`) et génère un rapport de santé JSON structuré (`OK`, `WARNING`, `CRITICAL`).
+Swagger : http://127.0.0.1:8084/docs  
+Admin (catalogue + import) : http://127.0.0.1:8084/admin.html  
 
----
+**Accès & procédures (token, NPM, CLI)** :  
+- Versionnées (sans secret) : [`docs/procedures.md`](docs/procedures.md)  
+- Conception / plan : [`docs/conception/`](docs/conception/)  
+- Token QA en clair : [`ACCES-ET-PROCEDURES.md`](ACCES-ET-PROCEDURES.md) (local, non versionné)
 
-## 🧪 Suite de Tests Automated
+## Catégories & parties amis
 
-- **Tests unitaires et d'intégration (Python unittest)** : [`tests/test_music_refs.py`](tests/test_music_refs.py)
-  - 15 tests automatisés couvrant l'ensemble des fonctionnalités des tâches #4, #5 et #6 (`python3 -m unittest discover -s /workspace/music-refs/tests`).
+- Solo : filtre catégorie en haut de `/`
+- Salon : `/party.html` (code à partager)
+- Admin : créer catégories + cocher punchlines → Assigner
+- Conception : [docs/conception/02-categories-et-parties.md](docs/conception/02-categories-et-parties.md)
 
----
+```bash
+curl -sS http://127.0.0.1:8084/api/music-refs/categories | jq .
+curl -sS -X POST http://127.0.0.1:8084/api/music-refs/parties \
+  -H 'Content-Type: application/json' \
+  -d '{"category_id":1,"host_name":"Alex","round_limit":5}' | jq .
+```
 
-## 📌 Informations Git & Branche
+## Compte / secret admin
 
-- **Branche de feature** : `ada-feature-6`
-- **Remote Origin** : `origin`
-- **Message de commit** : `feat: implement user stories for task #6`
+| Clé | Usage |
+|---|---|
+| `ADMIN_TOKEN` (fichier `.env`) | Header `X-Admin-Token` pour `POST /import`, `POST /quotes`, `DELETE` |
+
+Le token généré pour cet environnement est documenté dans `ACCES-ET-PROCEDURES.md` et `.env` (non commités).
+
+L’admin permet de **voir les réponses** (artiste + titre) pour chaque punchline dans le catalogue, pas seulement d’importer.
+
+## Peupler les punchlines (sans IA)
+
+1. Ouvrir `/admin.html`, coller le token.
+2. Saisir **artiste + titre** (ex. Damso / Macarena).
+3. L’API appelle **LRCLIB** (paroles) + **iTunes** (année / album / genre).
+4. Cocher les lignes → Enregistrer → elles apparaissent dans `GET /api/music-refs/quotes`.
+
+CLI :
+
+```bash
+TOKEN="$(grep ADMIN_TOKEN .env | cut -d= -f2)"
+
+curl -sS -X POST http://127.0.0.1:8084/api/music-refs/import \
+  -H "Content-Type: application/json" \
+  -H "X-Admin-Token: $TOKEN" \
+  -d '{"artist":"Damso","title":"Macarena"}'
+
+curl -sS -X POST http://127.0.0.1:8084/api/music-refs/quotes \
+  -H "Content-Type: application/json" \
+  -H "X-Admin-Token: $TOKEN" \
+  -d '{"quotes":[{"quote":"…","artist":"Damso","title":"Macarena","hints":{"year":"2017","genre":"Hip-Hop/Rap","album":"Ipséité","initials":"…"}}]}'
+```
+
+## Endpoints
+
+| Méthode | Chemin | Auth |
+|---|---|---|
+| GET | `/health` | non |
+| GET | `/api/music-refs/quotes` | non |
+| GET | `/api/music-refs/random` | non |
+| POST | `/api/music-refs/import` | `X-Admin-Token` |
+| POST | `/api/music-refs/quotes` | `X-Admin-Token` |
+| DELETE | `/api/music-refs/quotes/{id}` | `X-Admin-Token` |
+
+Stockage : SQLite `backend/data/quotes.db` (seed initial depuis `backend/seed_quotes.json`).
+
+## Routage NPM
+
+Proposer / vérifier dans nginx-proxy-manager :
+
+- Domaine : `music-refs-dev.kladriva.ca`
+- Forward : `172.17.0.1:8084` (plus `8082`)
+
+## Stack SSL historique
+
+Scripts `scripts/cert_manager.py`, `scripts/ssl_monitor.py` et `certs/` : tâches ADA #6 (certifs auto-signés SNI). En prod via NPM, Let’s Encrypt côté NPM.
