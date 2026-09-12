@@ -368,12 +368,20 @@
 
   <!-- Inline Application Logic -->
   <script type="module">
-    import { GameEngine, loadQuotesFromApi, loadCategories, buildQuizChoices } from './src/services/gameService.js';
+    import { GameEngine, loadQuotesFromApi, loadCategories, loadQuizOptions, submitSoloAnswer, revealSoloQuote } from './src/services/gameService.js';
     import { bindSfxToggle, playSuccess, playPartial, playError, playStreak, unlockSfx } from './src/services/sfx.js';
 
     bindSfxToggle();
-    const game = new GameEngine([]);
+    // SEC-02 : le verdict (artiste/titre justes, points) est calculé par le serveur ;
+    // le moteur local ne garde que combo, record et HUD.
+    const game = new GameEngine([], {
+      verify: (quote, { artist, title, hintsUsed }) => submitSoloAnswer('', quote.id, {
+        artist, title, hintsUsed, mode: isEasyMode() ? 'easy' : 'classic',
+      }),
+    });
     let quizPick = { artist: null, title: null };
+    let currentCategoryId = null;
+    let validating = false;
 
     // DOM Elements
     function setHud(name, value) {
@@ -445,10 +453,22 @@
       }`;
     }
 
-    function paintQuizChoices() {
+    async function paintQuizChoices() {
       if (!isEasyMode() || !game.currentQuote) return;
-      const choices = buildQuizChoices(game.currentQuote, game.quotes, 4);
+      const quote = game.currentQuote;
       quizPick = { artist: null, title: null };
+      quizArtists.innerHTML = '<p class="text-xs text-slate-500">Chargement des propositions…</p>';
+      quizTitles.innerHTML = '';
+      let choices;
+      try {
+        // SEC-01 : propositions mélangées fournies par le serveur (aucune réponse dans le catalogue)
+        choices = await loadQuizOptions('', quote, game.quotes, { count: 4, categoryId: currentCategoryId });
+      } catch (err) {
+        console.warn('Propositions indisponibles', err);
+        quizArtists.innerHTML = '<p class="text-xs text-rose-300">Propositions indisponibles — passe en mode Normal.</p>';
+        return;
+      }
+      if (game.currentQuote !== quote) return; // la punchline a changé entre-temps
 
       function fill(box, options, field) {
         box.innerHTML = '';
@@ -578,9 +598,10 @@
       }
     });
 
-    // Form Submit (Answer Validation)
-    answerForm.addEventListener('submit', (e) => {
+    // Form Submit (Answer Validation) — verdict serveur (SEC-02)
+    answerForm.addEventListener('submit', async (e) => {
       e.preventDefault();
+      if (validating) return;
       const valArtist = isEasyMode()
         ? (quizPick.artist || '').trim()
         : inputArtist.value.trim();
@@ -602,7 +623,17 @@
         return;
       }
 
-      const res = game.validateAnswer(valArtist, valTitle);
+      validating = true;
+      btnSubmit.disabled = true;
+      let res;
+      try {
+        res = await game.validateAnswer(valArtist, valTitle);
+      } catch (err) {
+        res = { success: false, message: err.message || 'Vérification impossible, réessaie.' };
+      } finally {
+        validating = false;
+        btnSubmit.disabled = false;
+      }
       unlockSfx();
 
       if (res.success) {
@@ -613,8 +644,9 @@
         if (game.titleGuessed) inputTitle.disabled = true;
 
         if (res.isFullyGuessed) {
-          revealArtist.textContent = game.currentQuote.artist;
-          revealTitle.textContent = game.currentQuote.title;
+          const reveal = res.reveal || game.reveal || {};
+          revealArtist.textContent = reveal.artist || '—';
+          revealTitle.textContent = reveal.title || '—';
           answerRevealCard.classList.remove('hidden');
           btnSubmit.disabled = true;
           celebrateWin();
@@ -636,20 +668,40 @@
       }
     });
 
-    // Next Quote / Skip
-    btnNext.addEventListener('click', () => {
-      // Reveal answer if not already fully guessed
-      if (!game.artistGuessed || !game.titleGuessed) {
-        revealArtist.textContent = game.currentQuote.artist;
-        revealTitle.textContent = game.currentQuote.title;
-        answerRevealCard.classList.remove('hidden');
-        showToast(`Citation passée. Réponse : ${game.currentQuote.artist} — ${game.currentQuote.title}`, false);
+    // Next Quote / Skip — la réponse est demandée au serveur au moment de l'abandon (SEC-01)
+    btnNext.addEventListener('click', async () => {
+      const q = game.currentQuote;
+      let delay = 0;
+      if (q && (!game.artistGuessed || !game.titleGuessed)) {
+        btnNext.disabled = true;
+        let reveal = game.reveal;
+        if (!reveal) {
+          if (q.artist && q.title) {
+            reveal = { artist: q.artist, title: q.title }; // catalogue statique (hors-ligne)
+          } else {
+            try {
+              reveal = await revealSoloQuote('', q.id);
+            } catch (err) {
+              console.warn('Révélation indisponible', err);
+            }
+          }
+        }
+        btnNext.disabled = false;
+        if (reveal) {
+          revealArtist.textContent = reveal.artist;
+          revealTitle.textContent = reveal.title;
+          answerRevealCard.classList.remove('hidden');
+          showToast(`Citation passée. Réponse : ${reveal.artist} — ${reveal.title}`, false);
+        } else {
+          showToast('Citation passée.', false);
+        }
+        delay = 1000;
       }
 
       setTimeout(() => {
         game.selectRandomQuote();
         renderCurrentQuote();
-      }, 1000);
+      }, delay);
     });
 
     // Reset Modal Logic
@@ -679,6 +731,7 @@
     const soloCategory = document.getElementById('solo-category');
 
     async function bootSolo(categoryId = null) {
+      currentCategoryId = categoryId || null;
       const quotes = await loadQuotesFromApi('', categoryId || null);
       game.setQuotes(quotes);
       renderCurrentQuote();

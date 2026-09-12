@@ -32,6 +32,52 @@ export async function loadCategories(apiBase = '') {
 }
 
 /**
+ * SEC-01 — Propositions du mode quiz calculées côté serveur (bonne réponse + distracteurs,
+ * mélangés, sans indiquer laquelle est bonne). Repli local si la punchline porte encore
+ * ses réponses (catalogue statique hors-ligne).
+ */
+export async function loadQuizOptions(apiBase = '', quote, pool = [], { count = 4, categoryId = null } = {}) {
+  if (!quote) return { artists: [], titles: [] };
+  if (quote.artist && quote.title) {
+    return buildQuizChoices(quote, pool, count);
+  }
+  const params = new URLSearchParams({ count: String(count) });
+  if (categoryId != null) params.set('category_id', String(categoryId));
+  const res = await fetch(`${apiBase}/api/music-refs/quotes/${encodeURIComponent(quote.id)}/options?${params}`, {
+    headers: { Accept: 'application/json' },
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+/**
+ * SEC-02 — Verdict serveur pour le mode solo (MR-11).
+ * @returns {Promise<{artist_ok:boolean,title_ok:boolean,fully_correct:boolean,points:number,message?:string,reveal?:object}>}
+ */
+export async function submitSoloAnswer(apiBase = '', quoteId, { artist = '', title = '', hintsUsed = 0, mode = 'classic' } = {}) {
+  const res = await fetch(`${apiBase}/api/music-refs/quotes/${encodeURIComponent(quoteId)}/answer`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ artist, title, hints_used: hintsUsed, mode }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(typeof data.detail === 'string' ? data.detail : `HTTP ${res.status}`);
+  }
+  return data;
+}
+
+/** Abandon (« Passer ») : révèle la réponse d'une punchline. */
+export async function revealSoloQuote(apiBase = '', quoteId) {
+  const res = await fetch(`${apiBase}/api/music-refs/quotes/${encodeURIComponent(quoteId)}/reveal`, {
+    method: 'POST',
+    headers: { Accept: 'application/json' },
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+/**
  * Build multiple-choice options for easy/quiz mode.
  * Returns { artists: string[], titles: string[] } (correct answer included, shuffled).
  */
@@ -207,9 +253,59 @@ function levenshteinDistance(a, b) {
   return matrix[a.length][b.length];
 }
 
+/**
+ * Barème local (uniquement pour le repli hors-ligne sur le catalogue statique) —
+ * identique au barème serveur (backend/scoring.py).
+ */
+export function localVerdict(quote, inputArtist, inputTitle, hintsUsed = 0) {
+  const artist = (inputArtist || '').trim();
+  const title = (inputTitle || '').trim();
+  let artistOk = artist ? isMatch(artist, quote.artist) : false;
+  let titleOk = title ? isMatch(title, quote.title) : false;
+  if (artist && !title && isMatch(artist, quote.title)) titleOk = true;
+  if (title && !artist && isMatch(title, quote.artist)) artistOk = true;
+  let points = 0;
+  if (artistOk) points += 100;
+  if (titleOk) points += 100;
+  if (artistOk && titleOk) points += 50;
+  if (points > 0) {
+    points = Math.max(20, points - Math.min(hintsUsed, 4) * 20);
+  }
+  const fully = artistOk && titleOk;
+  return {
+    artist_ok: artistOk,
+    title_ok: titleOk,
+    fully_correct: fully,
+    half_points: artistOk && !titleOk,
+    points,
+    message: fully
+      ? `Artiste trouvé: ${quote.artist} | Titre trouvé: ${quote.title}`
+      : artistOk
+        ? `Artiste juste (${quote.artist}), titre faux : moitié des points.`
+        : titleOk
+          ? `Titre trouvé: ${quote.title} — il manque l'artiste.`
+          : 'Mauvaise réponse. Réessayez ou demandez un indice !',
+    reveal: fully ? { artist: quote.artist, title: quote.title, listen_url: quote.listen_url || '' } : null,
+  };
+}
+
 export class GameEngine {
-  constructor(quotesList = MUSIC_QUOTES) {
+  /**
+   * @param {Array} quotesList
+   * @param {object} [opts]
+   * @param {(quote:object, payload:{artist:string,title:string,hintsUsed:number}) => Promise<object>} [opts.verify]
+   *   Vérificateur serveur (SEC-02/SEC-03). Sans lui, repli local si la punchline porte ses réponses.
+   * @param {boolean} [opts.comboBonus=true] bonus de série calculé localement ((série-1)×50) ;
+   *   false quand le serveur l'inclut déjà (salon).
+   */
+  constructor(quotesList = MUSIC_QUOTES, opts = {}) {
+    this.verify = typeof opts.verify === 'function' ? opts.verify : null;
+    this.comboBonus = opts.comboBonus !== false;
     this.quotes = [...quotesList];
+    this.quotePoints = 0; // points déjà attribués pour la punchline courante (total cumulé serveur)
+    this.acceptedArtist = '';
+    this.acceptedTitle = '';
+    this.reveal = null; // {artist, title, listen_url} une fois connu (verdict complet ou abandon)
     this.playedIds = new Set();
     this.currentQuote = null;
     this.score = 0;
@@ -233,6 +329,21 @@ export class GameEngine {
    * @param {object} [opts]
    * @param {boolean} [opts.ordered] play in list order (party mode)
    */
+  setVerifier(fn) {
+    this.verify = typeof fn === 'function' ? fn : null;
+  }
+
+  /** Réinitialise l'état propre à une punchline. */
+  _resetQuoteState() {
+    this.revealedHints.clear();
+    this.artistGuessed = false;
+    this.titleGuessed = false;
+    this.quotePoints = 0;
+    this.acceptedArtist = '';
+    this.acceptedTitle = '';
+    this.reveal = null;
+  }
+
   setQuotes(quotesList, opts = {}) {
     this.quotes = Array.isArray(quotesList) && quotesList.length ? [...quotesList] : [...MUSIC_QUOTES];
     this.playedIds.clear();
@@ -246,9 +357,7 @@ export class GameEngine {
   }
 
   selectOrderedQuote(index = 0) {
-    this.revealedHints.clear();
-    this.artistGuessed = false;
-    this.titleGuessed = false;
+    this._resetQuoteState();
     if (!this.quotes.length) {
       this.currentQuote = null;
       return null;
@@ -298,10 +407,7 @@ export class GameEngine {
   }
 
   selectRandomQuote() {
-    // Reset quote state
-    this.revealedHints.clear();
-    this.artistGuessed = false;
-    this.titleGuessed = false;
+    this._resetQuoteState();
 
     // Reset played if all have been played
     if (this.playedIds.size >= this.quotes.length) {
@@ -338,88 +444,103 @@ export class GameEngine {
     };
   }
 
-  validateAnswer(inputArtist, inputTitle) {
+  /**
+   * Valide une réponse. Le VERDICT (artiste/titre justes, points de base) vient du
+   * serveur via `this.verify` ; le moteur ne garde que combo, record et HUD.
+   * Repli local uniquement si la punchline porte ses réponses (catalogue statique).
+   * @returns {Promise<object>} même forme qu'avant (success, pointsGained, streak, score, …)
+   */
+  async validateAnswer(inputArtist, inputTitle) {
     if (!this.currentQuote) return { success: false, message: 'No active quote' };
-
-    let artistMatch = false;
-    let titleMatch = false;
-
-    if (inputArtist && !this.artistGuessed) {
-      artistMatch = isMatch(inputArtist, this.currentQuote.artist);
+    const q = this.currentQuote;
+    // On renvoie les champs déjà validés pour que le serveur voie l'état cumulé.
+    const artist = this.artistGuessed ? this.acceptedArtist : (inputArtist || '').trim();
+    const title = this.titleGuessed ? this.acceptedTitle : (inputTitle || '').trim();
+    if (!artist && !title) {
+      return { success: false, pointsGained: 0, streak: this.streak, score: this.score, message: 'Saisissez au moins l\'artiste ou le titre.' };
     }
-    if (inputTitle && !this.titleGuessed) {
-      titleMatch = isMatch(inputTitle, this.currentQuote.title);
+    const hintsUsed = this.revealedHints.size;
+    let verdict;
+    if (this.verify) {
+      verdict = await this.verify(q, { artist, title, hintsUsed });
+    } else if (q.artist && q.title) {
+      verdict = localVerdict(q, artist, title, hintsUsed);
+    } else {
+      return { success: false, pointsGained: 0, streak: this.streak, score: this.score, message: 'Vérification indisponible (serveur injoignable).' };
     }
+    return this.applyVerdict(verdict, { artist, title });
+  }
 
-    // Also support single input field guessing either or both
-    if (!inputTitle && inputArtist) {
-      if (!this.artistGuessed && isMatch(inputArtist, this.currentQuote.artist)) {
-        artistMatch = true;
-      }
-      if (!this.titleGuessed && isMatch(inputArtist, this.currentQuote.title)) {
-        titleMatch = true;
-      }
-    }
-
+  /**
+   * Applique un verdict (serveur ou local) à l'état du moteur : combo, record, score.
+   * `verdict.points` = total cumulé pour la punchline ; si `verdict.score` est fourni
+   * (salon), il fait autorité.
+   */
+  applyVerdict(verdict, { artist = '', title = '' } = {}) {
+    if (!verdict) return { success: false, pointsGained: 0, streak: this.streak, score: this.score, message: 'Verdict indisponible' };
+    const artistMatch = !!verdict.artist_ok && !this.artistGuessed;
+    const titleMatch = !!verdict.title_ok && !this.titleGuessed;
     this.totalAttempts++;
 
-    let pointsGained = 0;
-    let feedback = [];
-
-    if (artistMatch && !this.artistGuessed) {
+    if (verdict.reveal) this.reveal = verdict.reveal;
+    if (verdict.artist_ok) {
       this.artistGuessed = true;
-      pointsGained += 100;
-      feedback.push(`Artiste trouvé: ${this.currentQuote.artist}`);
+      if (artist) this.acceptedArtist = artist;
     }
-
-    if (titleMatch && !this.titleGuessed) {
+    if (verdict.title_ok) {
       this.titleGuessed = true;
-      pointsGained += 100;
-      feedback.push(`Titre trouvé: ${this.currentQuote.title}`);
+      if (title) this.acceptedTitle = title;
     }
-
     const isFullyGuessed = this.artistGuessed && this.titleGuessed;
 
-    if (pointsGained > 0) {
-      // Calculate hint penalties (-20 per hint used)
-      const hintPenalty = this.revealedHints.size * 20;
-      pointsGained = Math.max(20, pointsGained - hintPenalty);
-
-      // Streak bonus if full quote guessed
-      if (isFullyGuessed) {
-        this.streak++;
-        this.successfulQuotes++;
-        const streakBonus = (this.streak - 1) * 50;
-        pointsGained += 50 + streakBonus; // full guess bonus + streak multiplier
-      }
-
-      this.score += pointsGained;
-      this.saveHighScore(this.score);
-
-      return {
-        success: true,
-        artistMatched: artistMatch,
-        titleMatched: titleMatch,
-        isFullyGuessed,
-        pointsGained,
-        streak: this.streak,
-        score: this.score,
-        highScore: this.highScore,
-        message: feedback.join(' | ') || 'Bonne réponse !'
-      };
-    } else {
-      // Wrong guess
+    if (!artistMatch && !titleMatch) {
       if (!this.artistGuessed && !this.titleGuessed) {
-        this.streak = 0; // reset streak on total error
+        this.streak = 0; // erreur totale : la série tombe
       }
+      if (Number.isFinite(verdict.streak)) this.streak = verdict.streak;
+      if (Number.isFinite(verdict.score)) this.score = verdict.score;
       return {
         success: false,
         pointsGained: 0,
         streak: this.streak,
         score: this.score,
-        message: 'Mauvaise réponse. Réessayez ou demandez un indice !'
+        message: verdict.message || 'Mauvaise réponse. Réessayez ou demandez un indice !'
       };
     }
+
+    let pointsGained;
+    if (Number.isFinite(verdict.score)) {
+      // Score serveur (salon) : autorité totale, série incluse.
+      pointsGained = Number.isFinite(verdict.awarded) ? verdict.awarded : Math.max(0, verdict.score - this.score);
+      this.score = verdict.score;
+      if (Number.isFinite(verdict.streak)) this.streak = verdict.streak;
+      else if (isFullyGuessed) this.streak++;
+    } else {
+      const total = Number(verdict.points) || 0;
+      pointsGained = Math.max(0, total - this.quotePoints);
+      this.quotePoints = Math.max(this.quotePoints, total);
+      if (isFullyGuessed) {
+        this.streak++;
+        if (this.comboBonus) pointsGained += (this.streak - 1) * 50; // bonus de série local
+      }
+      this.score += pointsGained;
+    }
+    if (isFullyGuessed) this.successfulQuotes++;
+    this.saveHighScore(this.score);
+
+    return {
+      success: true,
+      artistMatched: artistMatch,
+      titleMatched: titleMatch,
+      isFullyGuessed,
+      halfPoints: !!verdict.half_points,
+      pointsGained,
+      streak: this.streak,
+      score: this.score,
+      highScore: this.highScore,
+      reveal: this.reveal,
+      message: verdict.message || 'Bonne réponse !'
+    };
   }
 
   skipQuote() {

@@ -19,10 +19,10 @@ function prefersQuiet() {
 export function isSfxEnabled() {
   try {
     const v = localStorage.getItem(STORAGE_KEY);
-    if (v === null) return !prefersQuiet();
+    if (v === null) return false; // coupé par défaut (MR-10), mémorisé ensuite
     return v === '1';
   } catch (_) {
-    return true;
+    return false;
   }
 }
 

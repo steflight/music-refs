@@ -157,7 +157,8 @@
       const box = $('catalog');
       $('catalog-meta').textContent = 'Chargement…';
       try {
-        const res = await fetch('/api/music-refs/quotes', { headers: { Accept: 'application/json' } });
+        // SEC-01 : sans X-Admin-Token valide, le catalogue arrive sans artiste/titre.
+        const res = await fetch('/api/music-refs/quotes', { headers: { Accept: 'application/json', 'X-Admin-Token': tokenInput.value.trim() } });
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || JSON.stringify(data));
         $('catalog-meta').textContent = `${data.length} punchline(s) — coche pour assigner à une catégorie`;
@@ -180,7 +181,7 @@
                 <div class="space-y-1 min-w-0 w-full">
                   <p class="text-[10px] uppercase tracking-wide text-slate-500">#${q.id} · ${escapeHtml(rarity)} · Question</p>
                   <p class="text-sm text-slate-100">« ${escapeHtml(q.quote)} »</p>
-                  <p class="text-xs text-neonCyan"><span class="text-slate-500">Réponse :</span> <strong>${escapeHtml(q.artist)}</strong> — ${escapeHtml(q.title)}</p>
+                  <p class="text-xs text-neonCyan"><span class="text-slate-500">Réponse :</span> <strong>${escapeHtml(q.artist || '(token admin requis)')}</strong> — ${escapeHtml(q.title || '')}</p>
                   <p class="text-[11px] text-slate-500">${escapeHtml(hints.album || '—')} · ${escapeHtml(hints.year || '—')}</p>
                   <p class="text-[11px] text-purple-300">Catégories : ${escapeHtml(catNames)}</p>
                   <div class="grid sm:grid-cols-3 gap-2 pt-1" data-edit-row="${q.id}">

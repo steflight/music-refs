@@ -109,3 +109,36 @@ Proposer / vérifier dans nginx-proxy-manager :
 ## Stack SSL historique
 
 Scripts `scripts/cert_manager.py`, `scripts/ssl_monitor.py` et `certs/` : tâches ADA #6 (certifs auto-signés SNI). En prod via NPM, Let’s Encrypt côté NPM.
+
+## Mesure de la boucle (MR-19)
+
+- Collecte sans cookie tiers : `src/services/analytics.js` (`track(nom, props)`) enfile les événements
+  dans `localStorage` (`mr:analytics:queue`) et les envoie par lots (≤ 50) à `POST /api/music-refs/events`
+  (`navigator.sendBeacon` quand la page se cache, sinon `fetch` keepalive, vidage toutes les 10 s).
+  Identifiant joueur anonyme = l'UUID local du daily (`mr:player`, créé s'il manque) ; aucune donnée personnelle.
+- Liste blanche serveur : `daily_started`, `daily_completed`, `share_clicked`, `share_landed`, `streak_milestone`,
+  `challenge_created`, `challenge_accepted`, `notif_optin`, `quote_submitted` ; props ≤ 1 Ko ; horodatage serveur ;
+  table `events` purgée à 180 jours au démarrage.
+- Tableau de bord : http://127.0.0.1:8084/stats.html (token admin, mémorisé en `sessionStorage`), données via
+  `GET /api/music-refs/stats?days=30` (X-Admin-Token). Jours calendaires America/Toronto.
+  - DAU : joueurs distincts avec `daily_started` ou `daily_completed` le jour J.
+  - Rétention J+n (n = 1, 7, 30) : cohorte = joueurs dont le premier `daily_completed` tombe dans la fenêtre et dont
+    J+n est passé ; `pct` = % ayant un `daily_completed` exactement à J+n ; `pct_or_later` = à J+n ou plus tard.
+  - % parties partagées = (joueur, jour) avec `share_clicked` ÷ (joueur, jour) avec `daily_completed`.
+  - k-factor ≈ `share_landed` ÷ `daily_completed` (comptes bruts sur la fenêtre).
+
+## Contrats d'API — sécurité (SEC-01 → SEC-04, 2026-09-12)
+
+| Route | Comportement |
+|---|---|
+| `GET /api/music-refs/quotes`, `/random`, `/quotes/{id}` | Sans `X-Admin-Token` : `{id, quote, hints, rarity, category_ids}` (plus d'artiste/titre/lien). Avec token : complet. |
+| `GET /api/music-refs/quotes/{id}/options` | Propositions mélangées pour le quiz (`artists[]`, `titles[]`). |
+| `POST /api/music-refs/quotes/{id}/answer` | `{artist, title, hints_used, mode}` → verdict serveur `{artist_ok, title_ok, fully_correct, points, half_points, message, reveal}`. |
+| `POST /api/music-refs/quotes/{id}/reveal` | Abandon : renvoie artiste, titre, lien d'écoute. |
+| `POST /api/music-refs/parties/{code}/answer`, `/skip` | Réponse vérifiée serveur ; `/score` ignore désormais tout score client. |
+| `POST /api/music-refs/daily/answer` | Requiert `player_id` ; `skip:true` pour passer ; renvoie `score_delta`, `cell`, jamais la réponse. |
+| `GET /api/music-refs/daily/reveal?player_id=` | 403 tant que le joueur n'a pas joué les 5 citations. |
+| `POST /api/music-refs/daily/result` | Score recalculé serveur (400 si incohérent ou < 3 s/citation), pseudo modéré (422). |
+| Toute écriture publique | 429 au-delà de `RATE_LIMIT_PER_MINUTE` (défaut 120) par IP. |
+
+Barème (`backend/scoring.py`) : artiste 100 + titre 100 + 50 si complet, −20 par indice, × rareté (commune 1, rare 2, légendaire 3).

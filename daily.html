@@ -44,7 +44,11 @@
       60% { transform: translateX(-5px); }
       80% { transform: translateX(5px); }
     }
-    .shake { animation: shake-x .38s ease; }
+    .shake { animation: shake-x .28s ease; }
+    /* MR-10 : simple changement de couleur — seul retour visuel sous prefers-reduced-motion */
+    .quote-card.is-correct { border-color: rgba(52,211,153,.8); background: rgba(52,211,153,.10); }
+    .quote-card.is-wrong { border-color: rgba(251,191,36,.7); background: rgba(251,191,36,.08); }
+    .field-wrong { border-color: rgba(251,191,36,.7) !important; }
     @media (prefers-reduced-motion: reduce) {
       .shake { animation: none; }
       .quote-card { transition: none; }
@@ -83,6 +87,7 @@
         <p id="hud-combo" class="font-display text-2xl text-white">0</p>
       </div>
     </div>
+    <p id="streak-danger" aria-live="polite" role="status" class="text-center text-xs empty:hidden"></p>
     <p id="freeze-toast" class="hidden text-center text-xs text-amber-300"></p>
 
     <label class="block text-xs text-slate-400">Catégorie
@@ -102,9 +107,9 @@
         <p id="quote-text" class="text-lg sm:text-xl font-semibold italic text-center leading-relaxed">Chargement…</p>
       </div>
       <div id="hints-row" class="flex flex-wrap gap-2">
-        <button type="button" data-hint="year" class="tap flex-1 min-w-[7rem] rounded-xl border border-white/15 text-sm">📅 Année (-20)</button>
-        <button type="button" data-hint="genre" class="tap flex-1 min-w-[7rem] rounded-xl border border-white/15 text-sm">🎵 Genre (-20)</button>
-        <button type="button" data-hint="album" class="tap flex-1 min-w-[7rem] rounded-xl border border-white/15 text-sm">💿 Album (-20)</button>
+        <button type="button" data-hint="year" class="tap flex-1 min-w-[7rem] rounded-xl border border-white/15 text-sm">📅 Année</button>
+        <button type="button" data-hint="genre" class="tap flex-1 min-w-[7rem] rounded-xl border border-white/15 text-sm">🎵 Genre</button>
+        <button type="button" data-hint="album" class="tap flex-1 min-w-[7rem] rounded-xl border border-white/15 text-sm">💿 Album</button>
       </div>
       <p id="hint-out" class="text-xs text-neonCyan hidden"></p>
       <form id="form" class="space-y-3">
@@ -120,6 +125,7 @@
     <section id="end" class="hidden panel rounded-2xl border border-neonCyan/30 p-4 sm:p-6 space-y-4">
       <h2 class="font-display text-xl text-neonCyan">Terminé !</h2>
       <p id="end-summary" class="text-sm text-slate-300"></p>
+      <p id="end-error" aria-live="polite" class="hidden text-xs text-amber-300"></p>
       <pre id="share-block" class="bg-black/50 rounded-xl p-4 text-sm whitespace-pre-wrap border border-white/10 font-mono leading-relaxed"></pre>
       <div class="grid gap-2">
         <button type="button" id="btn-share" class="tap w-full rounded-xl bg-gradient-to-r from-neonPink to-purple-600 font-semibold">Partager</button>
@@ -136,7 +142,8 @@
 
       <div id="pseudo-box" class="hidden space-y-2 border-t border-white/10 pt-4">
         <p class="text-sm text-slate-300">Choisis un pseudo pour le classement (optionnel)</p>
-        <input id="pseudo-input" maxlength="16" class="tap w-full rounded-xl bg-black/40 border border-white/10 px-4" placeholder="Ex: Lex" />
+        <input id="pseudo-input" maxlength="16" minlength="3" aria-describedby="pseudo-error" class="tap w-full rounded-xl bg-black/40 border border-white/10 px-4" placeholder="Ex: Lex" />
+        <p id="pseudo-error" aria-live="polite" class="hidden text-xs text-amber-300"></p>
         <button type="button" id="btn-pseudo" class="tap w-full rounded-xl border border-neonCyan/40 text-neonCyan text-sm font-semibold">Enregistrer</button>
       </div>
       <p id="rank-line" class="text-sm text-slate-400"></p>
@@ -167,12 +174,25 @@
     import {
       getPlayer, setPseudo, getStreak, recordDailyCompletion, applyStreakFreeze,
       loadDailyState, saveDailyState, buildShareBlock, cellEmoji, prefersReducedMotion,
+      isStreakInDanger, hasStartedToday, secondsToNextToronto, formatCountdown,
+      validatePseudo, consumeShareRef, gridToCells, apiErrorMessage,
     } from './src/services/dailyStore.js';
 
     bindSfxToggle();
 
     const $ = (id) => document.getElementById(id);
     const params = new URLSearchParams(location.search);
+
+    // MR-19 : arrivée via partage (?ref=…) — émis une seule fois par session, puis URL nettoyée.
+    {
+      const landedRef = consumeShareRef(location.search, window.sessionStorage);
+      if (landedRef) track('share_landed', { ref: landedRef });
+      if (params.has('ref')) {
+        const u = new URL(location.href);
+        u.searchParams.delete('ref');
+        try { history.replaceState(history.state, '', u.pathname + u.search + u.hash); } catch (_) { /* ignore */ }
+      }
+    }
     const challengeCode = (location.pathname.match(/^\/d\/([A-Za-z0-9]+)/) || [])[1]
       || params.get('challenge')
       || params.get('d');
@@ -193,9 +213,30 @@
       challenge: null,
       reveals: [],
       leaderboard: [],
+      timeMs: 0,
+      busy: false,
+      serverCorrect: null,
+      complete: false,
     };
 
     let scoreAnim = null;
+
+    // MR-06 : pastille « Série en danger » (série > 0, set du jour non commencé, ≥ 20 h locale)
+    function refreshStreakDanger() {
+      const el = $('streak-danger');
+      if (!el) return;
+      const dateIso = state.pack?.date;
+      const danger = isStreakInDanger({
+        now: new Date(),
+        streak: getStreak().currentStreak || 0,
+        startedToday: hasStartedToday(dateIso),
+      });
+      if (!danger) { el.textContent = ''; return; }
+      if (el.textContent) return; // déjà affichée, ne pas ré-annoncer
+      el.innerHTML = '<span class="inline-flex items-center gap-1 rounded-full border border-amber-400/40 bg-amber-400/10 px-3 py-1 text-amber-300">⚠️ Série en danger — joue avant minuit</span>';
+    }
+    clearInterval(window.__mrDanger);
+    window.__mrDanger = setInterval(refreshStreakDanger, 60000);
 
     function toast(msg) { $('toast').textContent = msg || ''; }
 
@@ -250,10 +291,23 @@
         particleCount: 55,
         spread: 62,
         origin: { y: 0.65 },
-        ticks: 40,
+        ticks: 40, // ≈ 670 ms à 60 fps
         colors: ['#ff007f', '#00f0ff', '#facc15', '#a855f7'],
         disableForReducedMotion: true,
       });
+      clearTimeout(window.__mrConfetti);
+      window.__mrConfetti = setTimeout(() => { try { confetti.reset(); } catch (_) {} }, 800);
+    }
+
+    /** MR-10 : retour couleur (toujours) — seul retour visuel sous prefers-reduced-motion. */
+    function flashCard(kind) {
+      const card = $('quote-card');
+      card.classList.remove('is-correct', 'is-wrong');
+      void card.offsetWidth;
+      card.classList.add(kind === 'ok' ? 'is-correct' : 'is-wrong');
+      if (kind !== 'ok') {
+        ['in-artist', 'in-title'].forEach((id) => $(id).classList.add('field-wrong'));
+      }
     }
 
     async function loadCategories() {
@@ -305,6 +359,7 @@
       }
 
       const saved = loadDailyState(data.date, data.category_key);
+      refreshStreakDanger();
       if (saved && saved.completed) {
         Object.assign(state, saved, { pack: data, displayedScore: saved.score || 0 });
         showEnd(false);
@@ -342,7 +397,8 @@
       $('progress-label').textContent = `${state.index + 1} / ${state.pack.quotes.length}`;
       $('quote-text').textContent = q.quote;
       const card = $('quote-card');
-      card.classList.remove('rarity-rare', 'rarity-legendaire', 'shake');
+      card.classList.remove('rarity-rare', 'rarity-legendaire', 'shake', 'is-correct', 'is-wrong');
+      ['in-artist', 'in-title'].forEach((id) => $(id).classList.remove('field-wrong'));
       const rarity = q.rarity || 'commune';
       const badge = $('rarity-badge');
       if (rarity === 'rare') {
@@ -358,6 +414,11 @@
       } else {
         badge.classList.add('hidden');
       }
+      const cost = Number(q.hint_cost ?? 20);
+      document.querySelectorAll('[data-hint]').forEach((b) => {
+        const label = { year: '📅 Année', genre: '🎵 Genre', album: '💿 Album' }[b.dataset.hint] || b.dataset.hint;
+        b.textContent = `${label} (-${cost})`;
+      });
       $('in-artist').value = '';
       $('in-title').value = '';
       $('in-artist').disabled = false;
@@ -384,73 +445,94 @@
 
     async function submitAnswer(skip = false) {
       const q = currentQuote();
-      if (!q) return;
+      if (!q || state.busy) return;
       unlockSfx();
-      let artistOk = false;
-      let titleOk = false;
-      let points = 0;
       const rarity = q.rarity || 'commune';
+      const artist = skip ? '' : $('in-artist').value.trim();
+      const title = skip ? '' : $('in-title').value.trim();
+      if (!skip && !artist && !title) {
+        toast('Saisis artiste et/ou titre');
+        return;
+      }
 
-      if (!skip) {
-        const artist = $('in-artist').value.trim();
-        const title = $('in-title').value.trim();
-        if (!artist && !title) {
-          toast('Saisis artiste et/ou titre');
-          return;
-        }
-        const res = await fetch('/api/music-refs/daily/answer', {
+      // Toute citation (répondue OU passée) est vérifiée et comptée côté serveur.
+      state.busy = true;
+      let res;
+      try {
+        const r = await fetch('/api/music-refs/daily/answer', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             quote_id: q.id,
             artist,
             title,
+            skip: !!skip,
+            player_id: getPlayer().id,
+            hints_used: Math.min(3, state.hintsThis),
             date: state.pack.date,
             category_key: state.pack.category_key,
           }),
-        }).then((r) => r.json());
-        artistOk = !!res.artist_ok;
-        titleOk = !!res.title_ok;
-        points = Number(res.points || 0);
-        if (res.fully_correct) {
-          playSuccess();
-          burstConfetti();
-          try { navigator.vibrate?.(30); } catch (_) {}
-          state.combo += 1;
-          if (state.combo > 1) playStreak();
-          const mult = res.multiplier && res.multiplier !== 1 ? ` ×${res.multiplier}` : '';
-          toast(`OK +${points}${mult}`);
-        } else if (artistOk || titleOk) {
-          playPartial();
-          state.combo = 0;
-          toast(`Presque ! +${points}`);
-          shakeCard();
-        } else {
-          playError();
-          state.combo = 0;
-          toast('Raté');
-          shakeCard();
+        });
+        res = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          toast(apiErrorMessage(res, 'Réponse impossible pour le moment'));
+          return;
         }
-      } else {
+      } catch (_) {
+        toast('Connexion impossible — réessaie.');
+        return;
+      } finally {
+        state.busy = false;
+      }
+
+      const artistOk = !!res.artist_ok;
+      const titleOk = !!res.title_ok;
+      const full = !!res.fully_correct;
+      // Score autoritaire : delta net renvoyé par le serveur (indices déjà déduits).
+      const delta = Number(res.score_delta ?? 0);
+      const already = !!res.already_answered;
+
+      if (skip && !already) {
+        flashCard('ko');
         playError();
         state.combo = 0;
-        toast('Passé');
+        toast('Passée — on continue !');
+        shakeCard();
+      } else if (full) {
+        flashCard('ok');
+        playSuccess();
+        burstConfetti();
+        try { navigator.vibrate?.(30); } catch (_) {}
+        state.combo += 1;
+        if (state.combo > 1) playStreak();
+        const mult = res.multiplier && res.multiplier !== 1 ? ` ×${res.multiplier}` : '';
+        toast(`${already ? 'Déjà répondu · ' : ''}OK +${delta}${mult}`);
+      } else if (artistOk || titleOk) {
+        flashCard('ko');
+        playPartial();
+        state.combo = 0;
+        toast(`${already ? 'Déjà répondu · ' : ''}Presque ! +${delta}`);
+        shakeCard();
+      } else {
+        flashCard('ko');
+        playError();
+        state.combo = 0;
+        toast(already ? 'Déjà répondu' : 'Presque ! La suivante est pour toi.');
         shakeCard();
       }
 
-      const full = artistOk && titleOk;
-      let cellKind = 'black';
-      if (full && rarity === 'legendaire') cellKind = 'legendary';
-      else if (full && state.hintsThis > 0) cellKind = 'yellow';
-      else if (full) cellKind = 'green';
+      const cell = typeof res.cell === 'string' && res.cell
+        ? res.cell
+        : cellEmoji(full ? (rarity === 'legendaire' ? 'legendary' : (state.hintsThis > 0 ? 'yellow' : 'green')) : 'black');
 
       const prevScore = state.score;
-      if (full) state.score += Math.max(0, points - state.hintsThis * 20);
-      state.cells.push(cellEmoji(cellKind));
-      state.answers.push({ id: q.id, full, hints: state.hintsThis, rarity });
+      state.score += delta;
+      state.cells.push(cell);
+      state.answers.push({ id: q.id, full, hints: state.hintsThis, rarity, delta });
       state.index += 1;
-      syncHud(full && state.score !== prevScore);
+      syncHud(state.score !== prevScore);
       persist();
+      refreshStreakDanger();
 
       if (state.index >= state.pack.quotes.length) {
         setTimeout(() => showEnd(true), prefersReducedMotion() ? 200 : 900);
@@ -516,29 +598,92 @@
       });
     }
 
-    async function showEnd(justFinished) {
-      $('play').classList.add('hidden');
-      $('end').classList.remove('hidden');
-      const correct = state.answers.filter((a) => a.full).length;
-      const streakInfo = justFinished
-        ? recordDailyCompletion(state.pack.date)
-        : getStreak();
-      const streak = streakInfo.currentStreak || getStreak().currentStreak || 0;
-      const freezes = streakInfo.freezes ?? getStreak().freezes ?? 1;
+    function localCorrect() {
+      return state.answers.filter((a) => a.full).length;
+    }
+
+    /** Écran de fin + bloc de partage à partir de l'état courant (local puis serveur). */
+    function renderEndSummary(streak) {
+      const correct = state.serverCorrect ?? localCorrect();
       const block = buildShareBlock({
         edition: state.pack.edition,
         categoryName: state.pack.category_name || 'Toutes',
         cells: state.cells.length ? state.cells : ['⬛', '⬛', '⬛', '⬛', '⬛'],
         correct,
         streak,
-        freezes,
+        origin: location.origin,
       });
       $('share-block').textContent = block;
       $('btn-wa').href = `https://wa.me/?text=${encodeURIComponent(block)}`;
       $('end-summary').textContent = `${correct}/5 · ${state.hintsUsedTotal} indice(s) · score ${state.score}`;
       syncHud(false);
+      return correct;
+    }
 
-      if (state.challenge) {
+    function showEndError(msg) {
+      const el = $('end-error');
+      el.textContent = msg || '';
+      el.classList.toggle('hidden', !msg);
+    }
+
+    /** Valeurs autoritaires renvoyées par POST /daily/result. */
+    function applyServerResult(res) {
+      if (typeof res.score === 'number') state.score = res.score;
+      if (typeof res.correct === 'number') state.serverCorrect = res.correct;
+      if (typeof res.hints === 'number') state.hintsUsedTotal = res.hints;
+      const cells = gridToCells(res.grid);
+      if (cells.length) state.cells = cells;
+      state.complete = !!res.complete;
+      if (typeof res.pseudo === 'string' && res.pseudo && res.pseudo !== getPlayer().pseudo) setPseudo(res.pseudo);
+    }
+
+    function completedSnapshot(extra = {}) {
+      return {
+        completed: true,
+        score: state.score,
+        cells: state.cells,
+        answers: state.answers,
+        hintsUsedTotal: state.hintsUsedTotal,
+        startedAt: state.startedAt,
+        timeMs: state.timeMs,
+        serverCorrect: state.serverCorrect,
+        complete: state.complete,
+        reveals: state.reveals,
+        leaderboard: state.leaderboard,
+        rank: state.rank,
+        total_players: state.total_players,
+        ...extra,
+      };
+    }
+
+    function resultPayload(pseudo) {
+      return {
+        player_id: getPlayer().id,
+        pseudo: pseudo ?? (getPlayer().pseudo || ''),
+        score: state.score,
+        correct: state.serverCorrect ?? localCorrect(),
+        hints: state.hintsUsedTotal,
+        time_ms: state.timeMs,
+        grid: state.cells.join(''),
+        date: state.pack.date,
+        category_key: state.pack.category_key,
+        category_id: state.pack.category_id,
+      };
+    }
+
+    async function showEnd(justFinished) {
+      $('play').classList.add('hidden');
+      $('end').classList.remove('hidden');
+      showEndError('');
+      const streakInfo = justFinished
+        ? recordDailyCompletion(state.pack.date)
+        : getStreak();
+      const streak = streakInfo.currentStreak || getStreak().currentStreak || 0;
+      refreshStreakDanger();
+      let correct = renderEndSummary(streak);
+
+      const paintChallenge = () => {
+        if (!state.challenge) return;
         const cmp = $('challenge-compare');
         cmp.classList.remove('hidden');
         const won = state.score > state.challenge.creator_score;
@@ -549,57 +694,44 @@
           <p>Adversaire : <strong>${state.challenge.creator_score}</strong> · ${state.challenge.creator_correct}/5</p>
           <p class="text-neonPink font-display">${won ? 'Tu gagnes !' : tie ? 'Égalité' : 'Il/elle mène'}</p>
         `;
-      }
+      };
+      paintChallenge();
 
       if (justFinished) {
-        saveDailyState(state.pack.date, state.pack.category_key, {
-          completed: true,
-          score: state.score,
-          cells: state.cells,
-          answers: state.answers,
-          hintsUsedTotal: state.hintsUsedTotal,
-          startedAt: state.startedAt,
-        });
-        const timeMs = Date.now() - state.startedAt;
-        track('daily_completed', { score: state.score, hints: state.hintsUsedTotal, timeMs, correct });
+        // Temps réel, sans plancher artificiel : le serveur le contrôle.
+        state.timeMs = Math.max(0, Date.now() - state.startedAt);
+        saveDailyState(state.pack.date, state.pack.category_key, completedSnapshot());
+        track('daily_completed', { score: state.score, hints: state.hintsUsedTotal, timeMs: state.timeMs, correct });
         const player = getPlayer();
         if (!player.pseudo) $('pseudo-box').classList.remove('hidden');
+        let posted = false;
         try {
-          const res = await fetch('/api/music-refs/daily/result', {
+          const r = await fetch('/api/music-refs/daily/result', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              player_id: player.id,
-              pseudo: player.pseudo || '',
-              score: state.score,
-              correct,
-              hints: state.hintsUsedTotal,
-              time_ms: Math.max(timeMs, correct * 2500),
-              grid: state.cells.join(''),
-              date: state.pack.date,
-              category_key: state.pack.category_key,
-              category_id: state.pack.category_id,
-            }),
-          }).then((r) => r.json());
-          state.leaderboard = res.leaderboard || [];
-          state.reveals = res.reveals || [];
-          renderLeaderboard(state.leaderboard, res.rank, res.total_players);
-          renderReveals(state.reveals);
-          saveDailyState(state.pack.date, state.pack.category_key, {
-            completed: true,
-            score: state.score,
-            cells: state.cells,
-            answers: state.answers,
-            hintsUsedTotal: state.hintsUsedTotal,
-            startedAt: state.startedAt,
-            reveals: state.reveals,
-            leaderboard: state.leaderboard,
-            rank: res.rank,
-            total_players: res.total_players,
+            body: JSON.stringify(resultPayload()),
           });
-          tickCountdown(res.seconds_to_next || state.pack.seconds_to_next || 0);
+          const res = await r.json().catch(() => ({}));
+          if (!r.ok) {
+            showEndError(apiErrorMessage(res, 'Résultat non enregistré'));
+          } else {
+            posted = true;
+            applyServerResult(res);
+            correct = renderEndSummary(streak);
+            paintChallenge();
+            state.leaderboard = res.leaderboard || [];
+            state.reveals = res.reveals || [];
+            state.rank = res.rank;
+            state.total_players = res.total_players;
+            renderLeaderboard(state.leaderboard, res.rank, res.total_players);
+            renderReveals(state.reveals);
+            saveDailyState(state.pack.date, state.pack.category_key, completedSnapshot());
+          }
         } catch (_) {
-          tickCountdown(state.pack.seconds_to_next || 0);
+          showEndError('Connexion impossible — score non enregistré pour le moment.');
+        }
+        tickCountdown();
+        if (!posted) {
           await fetchRevealsFallback();
           await fetchBoardFallback();
         }
@@ -609,7 +741,7 @@
           track('streak_milestone', { days: streakInfo.milestone });
         }
       } else {
-        tickCountdown(state.pack.seconds_to_next || 0);
+        tickCountdown();
         const player = getPlayer();
         if (state.leaderboard?.length) {
           renderLeaderboard(state.leaderboard, state.rank, state.total_players);
@@ -627,8 +759,11 @@
         const qs = new URLSearchParams({
           date: state.pack.date,
           category_key: state.pack.category_key,
+          player_id: getPlayer().id,
         });
-        const data = await fetch(`/api/music-refs/daily/reveal?${qs}`).then((r) => r.json());
+        const r = await fetch(`/api/music-refs/daily/reveal?${qs}`);
+        if (!r.ok) return; // 403 : résultat incomplet → rien à dévoiler
+        const data = await r.json();
         state.reveals = data.reveals || [];
         renderReveals(state.reveals);
       } catch (_) { /* ignore */ }
@@ -647,45 +782,104 @@
       } catch (_) { /* ignore */ }
     }
 
-    function tickCountdown(seconds) {
+    // MR-02 : compte à rebours vers minuit America/Toronto (pas minuit local), rafraîchi chaque minute.
+    function tickCountdown() {
       const el = $('countdown');
-      let left = seconds;
       const paint = () => {
-        const h = Math.floor(left / 3600);
-        const m = Math.floor((left % 3600) / 60);
-        el.textContent = `Prochaines refs dans ${String(h).padStart(2, '0')} h ${String(m).padStart(2, '0')}`;
+        let left;
+        try { left = secondsToNextToronto(new Date()); } catch (_) { left = Number(state.pack?.seconds_to_next || 0); }
+        el.textContent = formatCountdown(left);
       };
       paint();
       clearInterval(window.__mrCd);
-      window.__mrCd = setInterval(() => {
-        left = Math.max(0, left - 60);
-        paint();
-      }, 60000);
+      window.__mrCd = setInterval(paint, 60000);
     }
 
+    async function copyBlock(channel) {
+      const text = $('share-block').textContent;
+      track('share_clicked', { channel });
+      try {
+        await navigator.clipboard.writeText(text);
+        toast('Copié !');
+      } catch (_) {
+        toast('Sélectionne le bloc ci-dessus pour le copier.');
+      }
+    }
+
+    // MR-03 : Web Share API détectée via navigator.canShare, sinon copie presse-papiers.
     async function share() {
       const text = $('share-block').textContent;
-      track('share_clicked', { channel: 'share' });
-      try {
-        if (navigator.share) {
+      const canNative = typeof navigator.share === 'function'
+        && typeof navigator.canShare === 'function'
+        && navigator.canShare({ text });
+      if (canNative) {
+        track('share_clicked', { channel: 'native' });
+        try {
           await navigator.share({ text });
           return;
+        } catch (_) { /* annulé par l'utilisateur */ return; }
+      }
+      await copyBlock('copy');
+    }
+
+    // MR-12 : pseudo 3–16 caractères (trim) ; le serveur peut refuser (422 + detail en français).
+    async function savePseudo() {
+      const input = $('pseudo-input');
+      const err = $('pseudo-error');
+      const showErr = (msg) => { err.textContent = msg; err.classList.remove('hidden'); input.focus(); };
+      const v = validatePseudo(input.value);
+      if (!v.ok) { showErr(v.error); return; }
+      err.classList.add('hidden');
+      err.textContent = '';
+      const btn = $('btn-pseudo');
+      btn.disabled = true;
+      try {
+        // Re-POST /result (upsert) pour apparaître au classement avec ce pseudo.
+        const r = await fetch('/api/music-refs/daily/result', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(resultPayload(v.value)),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (r.status === 422) {
+          setPseudo(''); // pseudo refusé : rien de local
+          showErr(apiErrorMessage(data, 'Ce pseudo est refusé.'));
+          return; // saisie conservée dans le champ
         }
-      } catch (_) { /* cancel */ }
-      await navigator.clipboard.writeText(text);
-      toast('Copié !');
+        if (!r.ok) { showErr(apiErrorMessage(data, 'Erreur serveur')); return; }
+        applyServerResult(data);
+        const p = getPlayer().pseudo ? getPlayer() : setPseudo(v.value);
+        $('pseudo-box').classList.add('hidden');
+        $('rank-line').textContent = p.pseudo ? `Pseudo : ${p.pseudo}` : '';
+        if (Array.isArray(data.leaderboard)) {
+          state.leaderboard = data.leaderboard;
+          state.rank = data.rank;
+          state.total_players = data.total_players;
+          renderLeaderboard(state.leaderboard, data.rank, data.total_players);
+        }
+        renderEndSummary(getStreak().currentStreak || 0);
+        saveDailyState(state.pack.date, state.pack.category_key, completedSnapshot());
+      } catch (_) {
+        // Réseau indisponible : on garde le pseudo localement, il partira avec le prochain score.
+        const p = setPseudo(v.value);
+        $('pseudo-box').classList.add('hidden');
+        $('rank-line').textContent = p.pseudo ? `Pseudo : ${p.pseudo} (enregistré localement)` : '';
+      } finally {
+        btn.disabled = false;
+      }
     }
 
     async function createChallenge() {
       const player = getPlayer();
-      const correct = state.answers.filter((a) => a.full).length;
+      const correct = state.serverCorrect ?? localCorrect();
       try {
-        const res = await fetch('/api/music-refs/daily/challenge', {
+        // Le serveur reprend le résultat vérifié (score/correct/grid envoyés = informatifs).
+        const r = await fetch('/api/music-refs/daily/challenge', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             player_id: player.id,
-            pseudo: player.pseudo || 'Anonyme',
+            pseudo: player.pseudo || '',
             score: state.score,
             correct,
             grid: state.cells.join(''),
@@ -693,8 +887,9 @@
             category_key: state.pack.category_key,
             category_id: state.pack.category_id,
           }),
-        }).then((r) => r.json());
-        if (!res.code) throw new Error(res.detail || 'Erreur défi');
+        });
+        const res = await r.json().catch(() => ({}));
+        if (!r.ok || !res.code) throw new Error(apiErrorMessage(res, 'Défi indisponible'));
         const url = `${location.origin}/d/${res.code}`;
         $('challenge-link').textContent = url;
         $('challenge-link').classList.remove('hidden');
@@ -719,16 +914,14 @@
     $('btn-skip').addEventListener('click', () => submitAnswer(true));
     $('btn-share').addEventListener('click', share);
     $('btn-challenge').addEventListener('click', createChallenge);
-    $('btn-copy').addEventListener('click', async () => {
-      await navigator.clipboard.writeText($('share-block').textContent);
-      track('share_clicked', { channel: 'copy' });
-      toast('Copié !');
-    });
+    $('btn-copy').addEventListener('click', () => copyBlock('copy'));
     $('btn-wa').addEventListener('click', () => track('share_clicked', { channel: 'whatsapp' }));
-    $('btn-pseudo').addEventListener('click', () => {
-      const p = setPseudo($('pseudo-input').value);
-      $('pseudo-box').classList.add('hidden');
-      $('rank-line').textContent = p.pseudo ? `Pseudo : ${p.pseudo}` : '';
+    $('btn-pseudo').addEventListener('click', savePseudo);
+    $('pseudo-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); savePseudo(); }
+    });
+    $('pseudo-input').addEventListener('input', () => {
+      $('pseudo-error').classList.add('hidden');
     });
     $('milestone-close').addEventListener('click', () => $('milestone').classList.add('hidden'));
     $('daily-cat').addEventListener('change', () => loadDaily().catch((e) => toast(e.message)));
@@ -751,10 +944,6 @@
         persist();
       });
     });
-
-    if (params.get('ref') === 'share') {
-      track('share_landed', { ref: 'share' });
-    }
 
     // PWA light (MR-08 partiel — pas de push VAPID)
     if ('serviceWorker' in navigator) {

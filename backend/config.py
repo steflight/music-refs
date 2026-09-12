@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     database_path: str = "/app/data/quotes.db"
     user_agent: str = "MusicRefs/1.0 (music-refs-dev.kladriva.ca; contact@kladriva.ca)"
     cors_origins: str = "*"
+    rate_limit_per_minute: int = 120
 
 
 @lru_cache

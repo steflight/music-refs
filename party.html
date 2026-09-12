@@ -269,7 +269,7 @@
   </div>
 
   <script type="module">
-    import { GameEngine, buildQuizChoices } from './src/services/gameService.js';
+    import { GameEngine, loadQuizOptions } from './src/services/gameService.js';
     import { bindSfxToggle, playSuccess, playPartial, playError, playStreak, unlockSfx } from './src/services/sfx.js';
 
     bindSfxToggle();
@@ -285,7 +285,48 @@
       meId: null,
       mode: 'classic',
       quizPick: { artist: null, title: null },
+      categoryId: null,
+      validating: false,
     };
+
+    // SEC-03 : le serveur vérifie la réponse et attribue les points (score + série).
+    async function verifyPartyAnswer(quote, { artist, title, hintsUsed }) {
+      const res = await fetch(`/api/music-refs/parties/${state.code}/answer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          player_token: state.playerToken,
+          quote_id: quote.id,
+          artist,
+          title,
+          hints_used: hintsUsed || 0,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Vérification impossible');
+      if (data.party) {
+        if (data.party.me) state.meId = data.party.me.id;
+        renderLiveBoard(data.party);
+      }
+      return data;
+    }
+
+    // « Passer » : le serveur révèle la réponse, gèle la punchline (0 point) et casse la série.
+    async function skipPartyQuote(quote) {
+      const res = await fetch(`/api/music-refs/parties/${state.code}/skip`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ player_token: state.playerToken, quote_id: quote.id }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Abandon impossible');
+      if (state.game) {
+        state.game.score = data.score;
+        state.game.streak = 0;
+      }
+      if (data.party) renderLiveBoard(data.party);
+      return data.reveal;
+    }
 
     const $ = (id) => document.getElementById(id);
     const show = (id) => $(id).classList.remove('hidden');
@@ -465,9 +506,12 @@
         if (pRes.ok) {
           const p = await pRes.json();
           state.mode = p.mode === 'easy' ? 'easy' : 'classic';
+          state.categoryId = p.category ? p.category.id : null;
+          if (p.me) state.meId = p.me.id;
         }
       } catch (_) { /* ignore */ }
-      state.game = new GameEngine([]);
+      // Les punchlines arrivent SANS artiste/titre (SEC-01) ; verdict + score côté serveur (SEC-03).
+      state.game = new GameEngine([], { verify: verifyPartyAnswer, comboBonus: false });
       state.game.setQuotes(quotes, { ordered: true });
       state.startedLocal = true;
       $('g-code').textContent = state.code;
@@ -491,10 +535,20 @@
       $('g-quiz').classList.toggle('hidden', !easy);
     }
 
-    function paintPartyQuiz() {
+    async function paintPartyQuiz() {
       if (state.mode !== 'easy' || !state.game?.currentQuote) return;
-      const choices = buildQuizChoices(state.game.currentQuote, state.game.quotes, 4);
+      const quote = state.game.currentQuote;
       state.quizPick = { artist: null, title: null };
+      $('g-quiz-artists').innerHTML = '<p class="text-xs text-slate-500">Chargement des propositions…</p>';
+      $('g-quiz-titles').innerHTML = '';
+      let choices;
+      try {
+        choices = await loadQuizOptions('', quote, state.game.quotes, { count: 4, categoryId: state.categoryId });
+      } catch (err) {
+        $('g-quiz-artists').innerHTML = '<p class="text-xs text-rose-300">Propositions indisponibles.</p>';
+        return;
+      }
+      if (state.game?.currentQuote !== quote) return;
 
       function fill(boxId, options, field) {
         const box = $(boxId);
@@ -544,16 +598,20 @@
       const res = await fetch(`/api/music-refs/parties/${state.code}/score`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        // SEC-03 : plus de score envoyé — seulement la progression / la fin de partie.
         body: JSON.stringify({
           player_token: state.playerToken,
-          score: state.game ? state.game.score : 0,
           finished,
           progress,
         }),
       });
       if (res.ok) {
         const party = await res.json();
-        if (party.me) state.meId = party.me.id;
+        if (party.me) {
+          state.meId = party.me.id;
+          if (state.game) state.game.score = party.me.score; // score serveur = autorité
+          $('g-score').textContent = party.me.score;
+        }
         renderLiveBoard(party);
         return party;
       }
@@ -745,7 +803,20 @@
         $('g-toast').textContent = 'Choisis artiste et titre.';
         return;
       }
-      const res = state.game.validateAnswer(artist, title);
+      if (!artist && !title) {
+        $('g-toast').textContent = "Saisis au moins l'artiste ou le titre.";
+        return;
+      }
+      if (state.validating) return;
+      state.validating = true;
+      let res;
+      try {
+        res = await state.game.validateAnswer(artist, title);
+      } catch (err) {
+        res = { success: false, message: err.message || 'Vérification impossible, réessaie.' };
+      } finally {
+        state.validating = false;
+      }
       unlockSfx();
       $('g-score').textContent = state.game.score;
       if (res.success) {
@@ -753,7 +824,8 @@
         if (state.game.artistGuessed) $('g-artist').disabled = true;
         if (state.game.titleGuessed) $('g-title').disabled = true;
         if (res.isFullyGuessed) {
-          $('g-reveal').textContent = `${state.game.currentQuote.artist} — ${state.game.currentQuote.title}`;
+          const reveal = res.reveal || state.game.reveal || {};
+          $('g-reveal').textContent = `${reveal.artist || '—'} — ${reveal.title || '—'}`;
           $('g-reveal').classList.remove('hidden');
           celebrateWin();
           playSuccess();
@@ -765,7 +837,6 @@
         } else {
           playPartial();
         }
-        await syncScore(false);
       } else {
         playError();
         $('g-toast').textContent = res.message;
@@ -775,8 +846,14 @@
     $('g-next').addEventListener('click', async () => {
       const q = state.game.currentQuote;
       if (q && (!state.game.artistGuessed || !state.game.titleGuessed)) {
-        $('g-reveal').textContent = `${q.artist} — ${q.title}`;
-        $('g-reveal').classList.remove('hidden');
+        try {
+          const reveal = await skipPartyQuote(q);
+          $('g-reveal').textContent = `${reveal.artist} — ${reveal.title}`;
+          $('g-reveal').classList.remove('hidden');
+          $('g-score').textContent = state.game.score;
+        } catch (err) {
+          $('g-toast').textContent = err.message;
+        }
       }
       const next = state.game.advanceOrdered();
       await syncScore(false);

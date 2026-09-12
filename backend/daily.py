@@ -14,11 +14,17 @@ LAUNCH_DATE = date(2026, 9, 10)  # edition #1
 LOOKBACK_DAYS = 90
 SET_SIZE = 5
 
+# MR-09 — commune ×1, rare ×2, légendaire ×3 ; les indices coûtent proportionnellement.
 RARITY_MULT = {
-    "commune": 1.0,
-    "rare": 1.5,
-    "legendaire": 2.0,
+    "commune": 1,
+    "rare": 2,
+    "legendaire": 3,
 }
+HINT_COST = 20  # points retirés par indice, avant multiplicateur de rareté
+POINTS_ARTIST = 100
+POINTS_TITLE = 100
+POINTS_BOTH_BONUS = 50
+MIN_MS_PER_QUOTE = 3000  # MR-13 anti-triche : < 3 s par citation → refusé
 
 _ARTICLE_RE = re.compile(
     r"^(?:l'|d'|le|la|les|un|une|des|du|de|the|a|an)\s+",
@@ -156,9 +162,43 @@ def is_match(input_s: str, target: str) -> bool:
     return levenshtein(ni, nt) <= max_d
 
 
-def rarity_multiplier(rarity: str | None) -> float:
+def rarity_multiplier(rarity: str | None) -> int:
     key = (rarity or "commune").lower().strip()
-    return RARITY_MULT.get(key, 1.0)
+    return RARITY_MULT.get(key, 1)
+
+
+def hint_cost(rarity: str | None) -> int:
+    """Coût d'un indice, proportionnel à la rareté (MR-09)."""
+    return HINT_COST * rarity_multiplier(rarity)
+
+
+def answer_points(artist_ok: bool, title_ok: bool, rarity: str | None) -> int:
+    """Points bruts d'une réponse (avant indices), multiplicateur de rareté inclus."""
+    pts = 0
+    if artist_ok:
+        pts += POINTS_ARTIST
+    if title_ok:
+        pts += POINTS_TITLE
+    if artist_ok and title_ok:
+        pts += POINTS_BOTH_BONUS
+    return pts * rarity_multiplier(rarity)
+
+
+def answer_score(artist_ok: bool, title_ok: bool, rarity: str | None, hints_used: int = 0) -> int:
+    """Contribution au score du jour : seule une citation entièrement trouvée
+    rapporte, moins le coût des indices (jamais négatif)."""
+    if not (artist_ok and title_ok):
+        return 0
+    return max(0, answer_points(True, True, rarity) - max(0, int(hints_used)) * hint_cost(rarity))
+
+
+def grid_cell(full: bool, rarity: str | None, hints_used: int = 0) -> str:
+    """Case de la grille emoji (MR-03/MR-09) : 🟪 légendaire trouvée, 🟨 avec indice, 🟩 sans, ⬛ raté."""
+    if not full:
+        return "⬛"
+    if (rarity or "commune").lower() == "legendaire":
+        return "🟪"
+    return "🟨" if hints_used > 0 else "🟩"
 
 
 def _apply_rarity_constraints(candidates: list[dict[str, Any]], size: int) -> list[dict[str, Any]]:
@@ -194,7 +234,7 @@ def _apply_rarity_constraints(candidates: list[dict[str, Any]], size: int) -> li
                 elif swap:
                     chosen[-1] = swap
 
-    # Remplir si sous-effectif (pool trop filtré)
+    # Remplir si sous-effectif (pool trop filtré) : d'abord sans 2e légendaire…
     if len(chosen) < size:
         for q in candidates:
             if len(chosen) >= size:
@@ -205,6 +245,14 @@ def _apply_rarity_constraints(candidates: list[dict[str, Any]], size: int) -> li
                     1 for c in chosen if (c.get("rarity") or "").lower() == "legendaire"
                 ) >= 1:
                     continue
+                chosen.append(q)
+    # …puis, si le pool ne permet pas de respecter « ≤ 1 légendaire », on
+    # préfère un set complet (MR-01 : exactement 5) à un set tronqué.
+    if len(chosen) < size:
+        for q in candidates:
+            if len(chosen) >= size:
+                break
+            if q not in chosen:
                 chosen.append(q)
     return chosen[:size]
 

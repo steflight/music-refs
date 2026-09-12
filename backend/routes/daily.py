@@ -1,10 +1,15 @@
+import time
 from datetime import date
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, Field
 
 from daily import (
+    MIN_MS_PER_QUOTE,
+    answer_points,
+    answer_score,
     edition_number,
+    grid_cell,
+    hint_cost,
     is_match,
     rarity_multiplier,
     seconds_until_next_midnight_toronto,
@@ -14,49 +19,51 @@ from db import (
     count_daily_players,
     create_daily_challenge,
     daily_leaderboard,
+    get_daily_answers,
     get_daily_challenge,
+    get_daily_result,
+    get_daily_set_row,
     get_db,
     get_or_create_daily_set,
     get_quote,
+    has_complete_daily_result,
     new_challenge_code,
     quote_play_view,
     quote_reveal_view,
+    record_daily_answer,
     upsert_daily_result,
 )
+from moderation import validate_pseudo
+from schemas import DailyAnswerIn, DailyChallengeCreateIn, DailyResultIn
 
 router = APIRouter(prefix="/api/music-refs/daily", tags=["daily"])
 
+# Tolérance (ms) entre le temps déclaré par le client et l'écart mesuré serveur
+# entre la première et la dernière réponse (horloges différentes, latence).
+TIME_SPAN_TOLERANCE_MS = 2000
 
-class DailyAnswerIn(BaseModel):
-    quote_id: int
-    artist: str = ""
-    title: str = ""
-    date: str | None = None
-    category_key: str = "all"
-
-
-class DailyResultIn(BaseModel):
-    player_id: str = Field(min_length=8, max_length=64)
-    pseudo: str = ""
-    score: int = Field(ge=0, le=5000)
-    correct: int = Field(ge=0, le=5)
-    hints: int = Field(ge=0, le=50)
-    time_ms: int = Field(ge=0, le=3_600_000)
-    grid: str = Field(default="", max_length=32)
-    date: str | None = None
-    category_id: int | None = None
-    category_key: str | None = None
+MSG_REVEAL_FORBIDDEN = "Les réponses ne sont accessibles qu'après avoir joué les 5 citations du jour"
+MSG_NO_ANSWERS = "Aucune réponse vérifiée par le serveur pour ce joueur : joue d'abord les citations du jour"
+MSG_TIME_TOO_SHORT = "Temps trop court — score rejeté"
+MSG_TIME_INCONSISTENT = "Temps incohérent avec les réponses enregistrées — score rejeté"
+MSG_SCORE_INCONSISTENT = "Score incohérent avec les réponses vérifiées par le serveur"
+MSG_CHALLENGE_NEEDS_RESULT = "Termine d'abord le set du jour avant de lancer un défi"
 
 
-class ChallengeCreateIn(BaseModel):
-    player_id: str = Field(min_length=8, max_length=64)
-    pseudo: str = ""
-    score: int = Field(ge=0, le=5000)
-    correct: int = Field(ge=0, le=5)
-    grid: str = Field(default="", max_length=32)
-    date: str | None = None
-    category_id: int | None = None
-    category_key: str | None = None
+def _parse_day(raw: str | None) -> date:
+    if not raw:
+        return today_toronto()
+    try:
+        return date.fromisoformat(raw)
+    except ValueError as e:
+        raise HTTPException(400, "date invalide (YYYY-MM-DD)") from e
+
+
+def _pseudo_or_422(raw: str | None) -> str:
+    try:
+        return validate_pseudo(raw)
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
 
 
 def _resolve_category(
@@ -110,12 +117,7 @@ def get_daily(
     category: str | None = Query(default=None, description="slug, nom, id ou 'Toutes'"),
     date_str: str | None = Query(default=None, alias="date"),
 ):
-    day = today_toronto()
-    if date_str:
-        try:
-            day = date.fromisoformat(date_str)
-        except ValueError as e:
-            raise HTTPException(400, "date invalide (YYYY-MM-DD)") from e
+    day = _parse_day(date_str)
     day_iso = day.isoformat()
 
     with get_db() as conn:
@@ -128,7 +130,10 @@ def get_daily(
         for qid in dset["quote_ids"]:
             q = get_quote(conn, qid)
             if q:
-                quotes.append(quote_play_view(q))
+                view = quote_play_view(q)
+                view["multiplier"] = rarity_multiplier(view["rarity"])
+                view["hint_cost"] = hint_cost(view["rarity"])
+                quotes.append(view)
 
     return {
         "edition": dset["edition"],
@@ -144,101 +149,145 @@ def get_daily(
 
 @router.post("/answer")
 def post_answer(body: DailyAnswerIn):
-    day_iso = body.date or today_toronto().isoformat()
+    """Vérifie une réponse côté serveur. Ne révèle JAMAIS artiste/titre : le
+    joueur n'obtient que le verdict (artist_ok/title_ok) et les points. Les
+    réponses sont dévoilées uniquement par POST /result (set complet) ou
+    GET /reveal (résultat complet enregistré)."""
+    day_iso = _parse_day(body.date).isoformat()
+    cat_key = body.category_key or "all"
     with get_db() as conn:
         q = get_quote(conn, body.quote_id)
         if not q:
             raise HTTPException(404, "Citation introuvable")
-        # Ensure quote belongs to today's set for this category
-        dset = conn.execute(
-            "SELECT quote_ids FROM daily_sets WHERE date = ? AND category_key = ?",
-            (day_iso, body.category_key or "all"),
-        ).fetchone()
-        if dset:
-            ids = json_ids(dset["quote_ids"])
-            if body.quote_id not in ids:
-                raise HTTPException(400, "Cette citation n'est pas dans le set du jour")
+        dset = get_daily_set_row(conn, day_iso, cat_key)
+        if not dset:
+            raise HTTPException(404, "Set du jour introuvable")
+        if body.quote_id not in dset["quote_ids"]:
+            raise HTTPException(400, "Cette citation n'est pas dans le set du jour")
 
-        artist_ok = is_match(body.artist, q["artist"]) if body.artist.strip() else False
-        title_ok = is_match(body.title, q["title"]) if body.title.strip() else False
+        artist_in = "" if body.skip else body.artist.strip()
+        title_in = "" if body.skip else body.title.strip()
+        artist_ok = is_match(artist_in, q["artist"]) if artist_in else False
+        title_ok = is_match(title_in, q["title"]) if title_in else False
         # single field may match either
-        if body.artist.strip() and not body.title.strip():
-            if is_match(body.artist, q["title"]):
+        if artist_in and not title_in:
+            if is_match(artist_in, q["title"]):
                 title_ok = True
-            if is_match(body.artist, q["artist"]):
+            if is_match(artist_in, q["artist"]):
                 artist_ok = True
-
-        points = 0
-        if artist_ok:
-            points += 100
-        if title_ok:
-            points += 100
-        if artist_ok and title_ok:
-            points += 50
 
         rarity = (q.get("rarity") or "commune").lower()
         mult = rarity_multiplier(rarity)
-        points = int(round(points * mult))
+        points = answer_points(artist_ok, title_ok, rarity)
+        score_delta = answer_score(artist_ok, title_ok, rarity, body.hints_used)
+        hints_used = body.hints_used
+        already = False
 
-        reveal = None
-        if artist_ok and title_ok:
-            reveal = {
-                "artist": q["artist"],
-                "title": q["title"],
-                "listen_url": q.get("listen_url") or "",
-                "rarity": rarity,
-            }
+        if body.player_id:
+            stored, created = record_daily_answer(
+                conn,
+                day_iso=day_iso,
+                category_key=cat_key,
+                player_id=body.player_id,
+                quote_id=body.quote_id,
+                artist_ok=artist_ok,
+                title_ok=title_ok,
+                hints=body.hints_used,
+                score=score_delta,
+                skipped=body.skip or (not artist_in and not title_in),
+                answered_at_ms=int(time.time() * 1000),
+            )
+            if not created:
+                # Première réponse définitive : on renvoie le verdict stocké.
+                already = True
+                artist_ok, title_ok = stored["artist_ok"], stored["title_ok"]
+                points = answer_points(artist_ok, title_ok, rarity)
+                score_delta = stored["score"]
+                hints_used = stored["hints"]
 
+        full = artist_ok and title_ok
         return {
             "artist_ok": artist_ok,
             "title_ok": title_ok,
-            "fully_correct": artist_ok and title_ok,
+            "fully_correct": full,
             "points": points,
+            "score_delta": score_delta,
+            "hint_cost": hint_cost(rarity),
             "rarity": rarity,
             "multiplier": mult,
-            "reveal": reveal,
+            "cell": grid_cell(full, rarity, hints_used),
+            "already_answered": already,
+            "tracked": bool(body.player_id),
         }
-
-
-def json_ids(raw: str) -> list[int]:
-    import json
-
-    return [int(x) for x in json.loads(raw)]
 
 
 @router.post("/result")
 def post_result(body: DailyResultIn):
-    day = today_toronto()
-    if body.date:
-        try:
-            day = date.fromisoformat(body.date)
-        except ValueError as e:
-            raise HTTPException(400, "date invalide") from e
+    """Enregistre le résultat du jour. Le score, le nombre de bonnes réponses,
+    les indices et la grille sont RECALCULÉS à partir des réponses vérifiées
+    par POST /answer ; la valeur envoyée par le client ne sert qu'au contrôle."""
+    day = _parse_day(body.date)
     day_iso = day.isoformat()
-
-    # Anti-cheat light: reject absurdly fast completions
-    if body.correct > 0 and body.time_ms < body.correct * 2000:
-        raise HTTPException(400, "Temps trop court — score rejeté")
+    pseudo = _pseudo_or_422(body.pseudo)
 
     ed = edition_number(day)
     with get_db() as conn:
         if body.category_key:
             cat_key = body.category_key
-            cat_id = body.category_id
         else:
-            cat_key, cat_id, _ = _resolve_category(conn, body.category_id, None)
+            cat_key, _, _ = _resolve_category(conn, body.category_id, None)
+
+        dset = get_daily_set_row(conn, day_iso, cat_key)
+        if not dset:
+            raise HTTPException(404, "Set du jour introuvable")
+        set_ids = set(dset["quote_ids"])
+        set_size = len(dset["quote_ids"])
+
+        answers = [a for a in get_daily_answers(conn, day_iso, cat_key, body.player_id) if a["quote_id"] in set_ids]
+        played = len(answers)
+        if played == 0:
+            raise HTTPException(400, MSG_NO_ANSWERS)
+
+        # MR-13 anti-triche : temps minimal par citation…
+        if body.time_ms < played * MIN_MS_PER_QUOTE:
+            raise HTTPException(400, MSG_TIME_TOO_SHORT)
+        # …et cohérence avec l'écart réel mesuré côté serveur
+        span = answers[-1]["answered_at_ms"] - answers[0]["answered_at_ms"]
+        if body.time_ms + TIME_SPAN_TOLERANCE_MS < span:
+            raise HTTPException(400, MSG_TIME_INCONSISTENT)
+
+        # Score serveur (autoritaire)
+        server_score = sum(a["score"] for a in answers)
+        server_correct = sum(1 for a in answers if a["artist_ok"] and a["title_ok"])
+        server_hints = sum(a["hints"] for a in answers)
+        if body.score > server_score or body.correct > server_correct:
+            raise HTTPException(400, MSG_SCORE_INCONSISTENT)
+
+        by_id = {a["quote_id"]: a for a in answers}
+        cells = []
+        for qid in dset["quote_ids"]:
+            a = by_id.get(qid)
+            if not a:
+                continue
+            q = get_quote(conn, qid)
+            rarity = (q or {}).get("rarity") or "commune"
+            cells.append(grid_cell(a["artist_ok"] and a["title_ok"], rarity, a["hints"]))
+        grid = "".join(cells)
+
+        complete = played >= set_size
         upsert_daily_result(
             conn,
             day_iso=day_iso,
             category_key=cat_key,
             edition=ed,
             player_id=body.player_id,
-            pseudo=body.pseudo,
-            score=body.score,
-            correct=body.correct,
-            hints=body.hints,
+            pseudo=pseudo,
+            score=server_score,
+            correct=server_correct,
+            hints=server_hints,
             time_ms=body.time_ms,
-            grid=body.grid,
+            grid=grid,
+            played=played,
         )
         board = daily_leaderboard(conn, day_iso, cat_key, 10)
         total = count_daily_players(conn, day_iso, cat_key)
@@ -257,16 +306,18 @@ def post_result(body: DailyResultIn):
                 rank = i
                 break
 
-        reveals: list[dict] = []
-        dset = conn.execute(
-            "SELECT quote_ids FROM daily_sets WHERE date = ? AND category_key = ?",
-            (day_iso, cat_key),
-        ).fetchone()
-        if dset:
-            reveals = _reveals_for_set(conn, json_ids(dset["quote_ids"]))
+        # MR-04 / SEC-01 : réponses dévoilées seulement si le set est complet
+        reveals: list[dict] = _reveals_for_set(conn, dset["quote_ids"]) if complete else []
 
     return {
         "ok": True,
+        "complete": complete,
+        "played": played,
+        "score": server_score,
+        "correct": server_correct,
+        "hints": server_hints,
+        "grid": grid,
+        "pseudo": pseudo,
         "rank": rank,
         "total_players": total,
         "leaderboard": board,
@@ -281,9 +332,7 @@ def get_board(
     category: str | None = Query(default=None),
     date_str: str | None = Query(default=None, alias="date"),
 ):
-    day = today_toronto()
-    if date_str:
-        day = date.fromisoformat(date_str)
+    day = _parse_day(date_str)
     day_iso = day.isoformat()
     with get_db() as conn:
         cat_key, _, _ = _resolve_category(conn, category_id, category)
@@ -297,53 +346,51 @@ def get_board(
 
 @router.get("/reveal")
 def get_reveal(
+    player_id: str | None = Query(default=None, min_length=8, max_length=64),
     category_id: int | None = Query(default=None),
     category: str | None = Query(default=None),
     date_str: str | None = Query(default=None, alias="date"),
     category_key: str | None = Query(default=None),
 ):
-    """Révélation artiste/titre/listen_url — destinée à l'écran de fin (post-5e)."""
-    day = today_toronto()
-    if date_str:
-        try:
-            day = date.fromisoformat(date_str)
-        except ValueError as e:
-            raise HTTPException(400, "date invalide") from e
+    """Révélation artiste/titre/listen_url — réservée à un joueur ayant un
+    résultat COMPLET (toutes les citations jouées) enregistré pour ce jour/catégorie."""
+    day = _parse_day(date_str)
     day_iso = day.isoformat()
+    if not player_id:
+        raise HTTPException(403, MSG_REVEAL_FORBIDDEN)
     with get_db() as conn:
         if category_key:
             cat_key = category_key
         else:
             cat_key, _, _ = _resolve_category(conn, category_id, category)
-        dset = conn.execute(
-            "SELECT quote_ids, edition FROM daily_sets WHERE date = ? AND category_key = ?",
-            (day_iso, cat_key),
-        ).fetchone()
+        dset = get_daily_set_row(conn, day_iso, cat_key)
         if not dset:
             raise HTTPException(404, "Set du jour introuvable")
+        if not has_complete_daily_result(conn, day_iso, cat_key, player_id):
+            raise HTTPException(403, MSG_REVEAL_FORBIDDEN)
         return {
             "date": day_iso,
             "category_key": cat_key,
-            "edition": int(dset["edition"]),
-            "reveals": _reveals_for_set(conn, json_ids(dset["quote_ids"])),
+            "edition": dset["edition"],
+            "reveals": _reveals_for_set(conn, dset["quote_ids"]),
         }
 
 
 @router.post("/challenge")
-def post_challenge(body: ChallengeCreateIn):
-    day = today_toronto()
-    if body.date:
-        try:
-            day = date.fromisoformat(body.date)
-        except ValueError as e:
-            raise HTTPException(400, "date invalide") from e
+def post_challenge(body: DailyChallengeCreateIn):
+    day = _parse_day(body.date)
     day_iso = day.isoformat()
+    pseudo = _pseudo_or_422(body.pseudo)
     with get_db() as conn:
         if body.category_key:
             cat_key = body.category_key
             cat_id = body.category_id
         else:
             cat_key, cat_id, _ = _resolve_category(conn, body.category_id, None)
+        # Le défi reprend le résultat vérifié serveur, pas les valeurs envoyées.
+        res = get_daily_result(conn, day_iso, cat_key, body.player_id)
+        if not res or not has_complete_daily_result(conn, day_iso, cat_key, body.player_id):
+            raise HTTPException(400, MSG_CHALLENGE_NEEDS_RESULT)
         code = new_challenge_code(conn)
         ch = create_daily_challenge(
             conn,
@@ -352,10 +399,10 @@ def post_challenge(body: ChallengeCreateIn):
             category_key=cat_key,
             category_id=cat_id,
             creator_player_id=body.player_id,
-            creator_pseudo=body.pseudo,
-            creator_score=body.score,
-            creator_correct=body.correct,
-            creator_grid=body.grid,
+            creator_pseudo=pseudo or res["pseudo"],
+            creator_score=res["score"],
+            creator_correct=res["correct"],
+            creator_grid=res["grid"] or body.grid,
         )
     return {
         "ok": True,

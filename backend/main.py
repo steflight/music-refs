@@ -7,8 +7,10 @@ from fastapi.staticfiles import StaticFiles
 
 from config import get_settings
 from db import init_db, seed_from_json
+from ratelimit import RateLimitMiddleware
 from routes.categories import router as categories_router
 from routes.daily import router as daily_router
+from routes.events import router as events_router
 from routes.parties import router as parties_router
 from routes.quotes import router as quotes_router
 
@@ -17,6 +19,9 @@ AVAILABLE_ENDPOINTS = [
     "GET /health",
     "GET /docs",
     "GET /api/music-refs/quotes",
+    "GET /api/music-refs/quotes/{id}/options",
+    "POST /api/music-refs/quotes/{id}/answer",
+    "POST /api/music-refs/quotes/{id}/reveal",
     "GET /api/music-refs/random",
     "GET /api/music-refs/categories",
     "GET /api/music-refs/daily",
@@ -26,10 +31,14 @@ AVAILABLE_ENDPOINTS = [
     "POST /api/music-refs/daily/challenge",
     "POST /api/music-refs/parties",
     "POST /api/music-refs/parties/join",
+    "POST /api/music-refs/parties/{code}/answer",
+    "POST /api/music-refs/parties/{code}/skip",
     "POST /api/music-refs/import",
     "POST /api/music-refs/quotes",
     "PATCH /api/music-refs/quotes/{id}",
     "DELETE /api/music-refs/quotes/{id}",
+    "POST /api/music-refs/events",
+    "GET /api/music-refs/stats?days=30",
 ]
 
 app = FastAPI(
@@ -40,6 +49,8 @@ app = FastAPI(
 
 settings = get_settings()
 origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
+# SEC-04 — limitation de débit (ajouté AVANT CORS pour que CORS reste le plus externe)
+app.add_middleware(RateLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins if origins != ["*"] else ["*"],
@@ -52,6 +63,7 @@ app.include_router(quotes_router)
 app.include_router(categories_router)
 app.include_router(parties_router)
 app.include_router(daily_router)
+app.include_router(events_router)
 
 
 def frontend_root() -> Path:
@@ -118,6 +130,18 @@ async def daily_page():
 @app.get("/party.html")
 async def party_page():
     page = FRONT / "party.html"
+    if page.exists():
+        return FileResponse(page)
+    return JSONResponse(
+        {"error": "Not Found", "status_code": 404, "available_endpoints": AVAILABLE_ENDPOINTS},
+        status_code=404,
+    )
+
+
+@app.get("/stats.html")
+async def stats_page():
+    """MR-19 — tableau de bord de la boucle (token admin requis pour les données)."""
+    page = FRONT / "stats.html"
     if page.exists():
         return FileResponse(page)
     return JSONResponse(

@@ -148,6 +148,27 @@ def init_db() -> None:
         cols = {r[1] for r in conn.execute("PRAGMA table_info(party_players)").fetchall()}
         if "progress" not in cols:
             conn.execute("ALTER TABLE party_players ADD COLUMN progress INTEGER NOT NULL DEFAULT 0")
+        # SEC-03 — série (combo) calculée côté serveur
+        if "streak" not in cols:
+            conn.execute("ALTER TABLE party_players ADD COLUMN streak INTEGER NOT NULL DEFAULT 0")
+        # SEC-03 — réponses du salon validées côté serveur (une ligne par joueur × punchline)
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS party_answers (
+                party_id INTEGER NOT NULL,
+                player_id INTEGER NOT NULL,
+                quote_id INTEGER NOT NULL,
+                artist_ok INTEGER NOT NULL DEFAULT 0,
+                title_ok INTEGER NOT NULL DEFAULT 0,
+                forfeited INTEGER NOT NULL DEFAULT 0,
+                points INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT DEFAULT (datetime('now')),
+                PRIMARY KEY (party_id, player_id, quote_id),
+                FOREIGN KEY (party_id) REFERENCES parties(id) ON DELETE CASCADE,
+                FOREIGN KEY (player_id) REFERENCES party_players(id) ON DELETE CASCADE
+            )
+            """
+        )
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS daily_sets (
@@ -195,12 +216,53 @@ def init_db() -> None:
             )
             """
         )
+        # MR-19 — événements analytics (sans donnée personnelle)
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts TEXT NOT NULL,
+                day TEXT NOT NULL,
+                name TEXT NOT NULL,
+                player_id TEXT NOT NULL,
+                props_json TEXT NOT NULL DEFAULT '{}'
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_events_day_name ON events(day, name)")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_events_name_player_day ON events(name, player_id, day)"
+        )
+        purge_old_events(conn, EVENTS_RETENTION_DAYS)
         # MR-04 / MR-09 — colonnes quotes (migration douce)
         quote_cols = {r[1] for r in conn.execute("PRAGMA table_info(quotes)").fetchall()}
         if "listen_url" not in quote_cols:
             conn.execute("ALTER TABLE quotes ADD COLUMN listen_url TEXT DEFAULT ''")
         if "rarity" not in quote_cols:
             conn.execute("ALTER TABLE quotes ADD COLUMN rarity TEXT NOT NULL DEFAULT 'commune'")
+        # MR-13 anti-triche — réponses vérifiées serveur, une par citation et par joueur
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS daily_answers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                category_key TEXT NOT NULL,
+                player_id TEXT NOT NULL,
+                quote_id INTEGER NOT NULL,
+                artist_ok INTEGER NOT NULL DEFAULT 0,
+                title_ok INTEGER NOT NULL DEFAULT 0,
+                hints INTEGER NOT NULL DEFAULT 0,
+                score INTEGER NOT NULL DEFAULT 0,
+                skipped INTEGER NOT NULL DEFAULT 0,
+                answered_at_ms INTEGER NOT NULL,
+                UNIQUE(date, category_key, player_id, quote_id)
+            )
+            """
+        )
+        # MR-04 / SEC-01 — nombre de citations jouées (résultat complet = taille du set)
+        result_cols = {r[1] for r in conn.execute("PRAGMA table_info(daily_results)").fetchall()}
+        if "played" not in result_cols:
+            conn.execute("ALTER TABLE daily_results ADD COLUMN played INTEGER NOT NULL DEFAULT 0")
         _seed_categories(conn)
 
 
@@ -929,21 +991,35 @@ def upsert_daily_result(
     hints: int,
     time_ms: int,
     grid: str,
+    played: int = 0,
 ) -> dict[str, Any]:
     conn.execute(
         """
         INSERT INTO daily_results
-            (date, category_key, edition, player_id, pseudo, score, correct, hints, time_ms, grid)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (date, category_key, edition, player_id, pseudo, score, correct, hints, time_ms, grid, played)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(date, category_key, player_id) DO UPDATE SET
             pseudo=excluded.pseudo,
             score=excluded.score,
             correct=excluded.correct,
             hints=excluded.hints,
             time_ms=excluded.time_ms,
-            grid=excluded.grid
+            grid=excluded.grid,
+            played=excluded.played
         """,
-        (day_iso, category_key, edition, player_id, (pseudo or "")[:40], score, correct, hints, time_ms, grid),
+        (
+            day_iso,
+            category_key,
+            edition,
+            player_id,
+            (pseudo or "")[:40],
+            score,
+            correct,
+            hints,
+            time_ms,
+            grid,
+            int(played),
+        ),
     )
     return {
         "date": day_iso,
@@ -952,7 +1028,130 @@ def upsert_daily_result(
         "player_id": player_id,
         "score": score,
         "correct": correct,
+        "played": int(played),
     }
+
+
+def get_daily_result(
+    conn: sqlite3.Connection, day_iso: str, category_key: str, player_id: str
+) -> dict[str, Any] | None:
+    row = conn.execute(
+        "SELECT * FROM daily_results WHERE date = ? AND category_key = ? AND player_id = ?",
+        (day_iso, category_key, player_id),
+    ).fetchone()
+    if not row:
+        return None
+    return {
+        "date": row["date"],
+        "category_key": row["category_key"],
+        "edition": int(row["edition"]),
+        "player_id": row["player_id"],
+        "pseudo": row["pseudo"] or "",
+        "score": int(row["score"]),
+        "correct": int(row["correct"]),
+        "hints": int(row["hints"]),
+        "time_ms": int(row["time_ms"]),
+        "grid": row["grid"] or "",
+        "played": int(_row_get(row, "played", 0) or 0),
+    }
+
+
+def get_daily_set_row(conn: sqlite3.Connection, day_iso: str, category_key: str) -> dict[str, Any] | None:
+    row = conn.execute(
+        "SELECT date, category_key, edition, quote_ids FROM daily_sets WHERE date = ? AND category_key = ?",
+        (day_iso, category_key),
+    ).fetchone()
+    if not row:
+        return None
+    return {
+        "date": row["date"],
+        "category_key": row["category_key"],
+        "edition": int(row["edition"]),
+        "quote_ids": [int(x) for x in json.loads(row["quote_ids"])],
+    }
+
+
+def has_complete_daily_result(
+    conn: sqlite3.Connection, day_iso: str, category_key: str, player_id: str
+) -> bool:
+    """MR-04 / SEC-01 : vrai si ce joueur a joué toutes les citations du set."""
+    dset = get_daily_set_row(conn, day_iso, category_key)
+    res = get_daily_result(conn, day_iso, category_key, player_id)
+    if not dset or not res:
+        return False
+    return res["played"] >= len(dset["quote_ids"]) > 0
+
+
+def record_daily_answer(
+    conn: sqlite3.Connection,
+    *,
+    day_iso: str,
+    category_key: str,
+    player_id: str,
+    quote_id: int,
+    artist_ok: bool,
+    title_ok: bool,
+    hints: int,
+    score: int,
+    skipped: bool,
+    answered_at_ms: int,
+) -> tuple[dict[str, Any], bool]:
+    """Enregistre la réponse vérifiée. La première réponse à une citation est
+    définitive : renvoie (réponse stockée, created)."""
+    cur = conn.execute(
+        """
+        INSERT OR IGNORE INTO daily_answers
+            (date, category_key, player_id, quote_id, artist_ok, title_ok, hints, score, skipped, answered_at_ms)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            day_iso,
+            category_key,
+            player_id,
+            int(quote_id),
+            1 if artist_ok else 0,
+            1 if title_ok else 0,
+            max(0, int(hints)),
+            max(0, int(score)),
+            1 if skipped else 0,
+            int(answered_at_ms),
+        ),
+    )
+    created = cur.rowcount == 1
+    row = conn.execute(
+        """
+        SELECT * FROM daily_answers
+        WHERE date = ? AND category_key = ? AND player_id = ? AND quote_id = ?
+        """,
+        (day_iso, category_key, player_id, int(quote_id)),
+    ).fetchone()
+    return _answer_row(row), created
+
+
+def _answer_row(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "quote_id": int(row["quote_id"]),
+        "artist_ok": bool(row["artist_ok"]),
+        "title_ok": bool(row["title_ok"]),
+        "hints": int(row["hints"]),
+        "score": int(row["score"]),
+        "skipped": bool(row["skipped"]),
+        "answered_at_ms": int(row["answered_at_ms"]),
+    }
+
+
+def get_daily_answers(
+    conn: sqlite3.Connection, day_iso: str, category_key: str, player_id: str
+) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        """
+        SELECT * FROM daily_answers
+        WHERE date = ? AND category_key = ? AND player_id = ?
+        ORDER BY answered_at_ms ASC, id ASC
+        """,
+        (day_iso, category_key, player_id),
+    ).fetchall()
+    return [_answer_row(r) for r in rows]
 
 
 def daily_leaderboard(conn: sqlite3.Connection, day_iso: str, category_key: str, limit: int = 10) -> list[dict]:
@@ -1050,3 +1249,180 @@ def new_challenge_code(conn: sqlite3.Connection) -> str:
         if not exists:
             return code
     raise RuntimeError("unable to allocate challenge code")
+
+
+# --- MR-19 : événements analytics & statistiques de la boucle ---
+
+EVENT_NAMES: frozenset[str] = frozenset(
+    {
+        "daily_started",
+        "daily_completed",
+        "share_clicked",
+        "share_landed",
+        "streak_milestone",
+        "challenge_created",
+        "challenge_accepted",
+        "notif_optin",
+        "quote_submitted",
+    }
+)
+EVENTS_RETENTION_DAYS = 180
+EVENT_PROPS_MAX_BYTES = 1024
+ACTIVE_EVENT_NAMES = ("daily_started", "daily_completed")
+
+
+def purge_old_events(conn: sqlite3.Connection, days: int = EVENTS_RETENTION_DAYS) -> int:
+    """Supprime les événements dont le jour est antérieur à (aujourd'hui - days)."""
+    from datetime import timedelta
+
+    from daily import today_toronto
+
+    cutoff = (today_toronto() - timedelta(days=days)).isoformat()
+    cur = conn.execute("DELETE FROM events WHERE day < ?", (cutoff,))
+    return cur.rowcount
+
+
+def insert_events(
+    conn: sqlite3.Connection,
+    *,
+    player_id: str,
+    items: list[tuple[str, dict[str, Any]]],
+    ts: str | None = None,
+    day: str | None = None,
+) -> int:
+    """Insère des événements déjà validés. `ts`/`day` sont l'horodatage serveur."""
+    from datetime import datetime
+
+    from daily import TZ
+
+    now = datetime.now(TZ)
+    ts_iso = ts or now.isoformat(timespec="seconds")
+    day_iso = day or now.date().isoformat()
+    conn.executemany(
+        "INSERT INTO events (ts, day, name, player_id, props_json) VALUES (?, ?, ?, ?, ?)",
+        [
+            (ts_iso, day_iso, name, player_id, json.dumps(props, ensure_ascii=False, separators=(",", ":")))
+            for name, props in items
+        ],
+    )
+    return len(items)
+
+
+def _pct(num: int, den: int) -> float:
+    return round(100.0 * num / den, 1) if den else 0.0
+
+
+def compute_stats(conn: sqlite3.Connection, days: int = 30, today: "date | None" = None) -> dict[str, Any]:
+    """Statistiques de la boucle (voir docstring de GET /api/music-refs/stats pour le format)."""
+    from datetime import date as date_cls
+    from datetime import timedelta
+
+    from daily import today_toronto
+
+    today = today or today_toronto()
+    days = max(1, min(int(days), 365))
+    start = today - timedelta(days=days - 1)
+    window_days = [(start + timedelta(days=i)).isoformat() for i in range(days)]
+    start_iso, today_iso = window_days[0], window_days[-1]
+
+    # DAU par jour : joueurs distincts ayant daily_started OU daily_completed
+    dau_rows = conn.execute(
+        """
+        SELECT day, COUNT(DISTINCT player_id) AS n FROM events
+        WHERE day BETWEEN ? AND ? AND name IN (?, ?)
+        GROUP BY day
+        """,
+        (start_iso, today_iso, *ACTIVE_EVENT_NAMES),
+    ).fetchall()
+    dau_by_day = {r["day"]: int(r["n"]) for r in dau_rows}
+    series = [{"day": d, "dau": dau_by_day.get(d, 0)} for d in window_days]
+    j7_iso = (today - timedelta(days=7)).isoformat()
+
+    # Compteurs par jour et par nom
+    count_rows = conn.execute(
+        """
+        SELECT day, name, COUNT(*) AS n FROM events
+        WHERE day BETWEEN ? AND ?
+        GROUP BY day, name
+        """,
+        (start_iso, today_iso),
+    ).fetchall()
+    counts: dict[str, dict[str, int]] = {d: {} for d in window_days}
+    totals = {name: 0 for name in sorted(EVENT_NAMES)}
+    for r in count_rows:
+        counts.setdefault(r["day"], {})[r["name"]] = int(r["n"])
+        totals[r["name"]] = totals.get(r["name"], 0) + int(r["n"])
+    by_day = [{"day": d, "dau": dau_by_day.get(d, 0), "counts": counts.get(d, {})} for d in window_days]
+
+    # Rétention par cohorte : premier jour de daily_completed d'un joueur (toutes données conservées)
+    completed = conn.execute(
+        "SELECT player_id, day FROM events WHERE name = 'daily_completed' GROUP BY player_id, day"
+    ).fetchall()
+    days_by_player: dict[str, set[str]] = {}
+    for r in completed:
+        days_by_player.setdefault(r["player_id"], set()).add(r["day"])
+    retention: dict[str, Any] = {}
+    for label, n in (("j1", 1), ("j7", 7), ("j30", 30)):
+        cohort = 0
+        exact = 0
+        or_later = 0
+        for pid, pdays in days_by_player.items():
+            first = date_cls.fromisoformat(min(pdays))
+            if first < start or first > today:
+                continue  # cohorte hors fenêtre
+            target = first + timedelta(days=n)
+            if target > today:
+                continue  # cohorte pas encore « mûre » pour J+n
+            cohort += 1
+            target_iso = target.isoformat()
+            if target_iso in pdays:
+                exact += 1
+            if any(d >= target_iso for d in pdays):
+                or_later += 1
+        retention[label] = {
+            "cohort": cohort,
+            "returned": exact,
+            "pct": _pct(exact, cohort),
+            "pct_or_later": _pct(or_later, cohort),
+        }
+
+    # Parties partagées et k-factor (fenêtre)
+    games = totals.get("daily_completed", 0)
+    games_distinct = int(
+        conn.execute(
+            "SELECT COUNT(*) FROM (SELECT DISTINCT player_id, day FROM events "
+            "WHERE name = 'daily_completed' AND day BETWEEN ? AND ?)",
+            (start_iso, today_iso),
+        ).fetchone()[0]
+    )
+    shared_distinct = int(
+        conn.execute(
+            "SELECT COUNT(*) FROM (SELECT DISTINCT player_id, day FROM events "
+            "WHERE name = 'share_clicked' AND day BETWEEN ? AND ?)",
+            (start_iso, today_iso),
+        ).fetchone()[0]
+    )
+    landed = totals.get("share_landed", 0)
+
+    return {
+        "days": days,
+        "from": start_iso,
+        "to": today_iso,
+        "timezone": "America/Toronto",
+        "dau": {
+            "today": dau_by_day.get(today_iso, 0),
+            "j7": dau_by_day.get(j7_iso, 0),
+            "avg": round(sum(dau_by_day.get(d, 0) for d in window_days) / days, 1),
+            "series": series,
+        },
+        "retention": retention,
+        "share": {
+            "games": games,
+            "games_distinct": games_distinct,
+            "shared_distinct": shared_distinct,
+            "pct": _pct(shared_distinct, games_distinct),
+        },
+        "k_factor": round(landed / games, 3) if games else 0.0,
+        "totals": totals,
+        "by_day": by_day,
+    }

@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="fr" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Music Refs — Stats de la boucle</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&family=Orbitron:wght@700&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Montserrat', 'sans-serif'], display: ['Orbitron', 'sans-serif'] },
+          colors: { neonPink: '#ff007f', neonCyan: '#00f0ff', darkBg: '#0b0f19', cardBg: '#151c2e' }
+        }
+      }
+    }
+  </script>
+  <style>
+    .tile-value { font-variant-numeric: tabular-nums; }
+    @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+  </style>
+</head>
+<body class="min-h-screen bg-[#0b0f19] text-slate-200 font-sans p-4 md:p-8">
+  <div class="max-w-5xl mx-auto space-y-6">
+    <header class="flex items-center justify-between gap-4 flex-wrap">
+      <div>
+        <h1 class="font-display text-2xl text-transparent bg-clip-text bg-gradient-to-r from-neonPink to-neonCyan">MUSIC REFS STATS</h1>
+        <p class="text-xs text-slate-400">Mesure de la boucle (MR-19) · DAU, rétention, partage, k-factor · fuseau America/Toronto</p>
+      </div>
+      <nav class="flex gap-3 text-sm">
+        <a href="/admin.html" class="text-neonPink hover:underline py-2">Admin</a>
+        <a href="/daily.html" class="text-purple-300 hover:underline py-2">Refs du jour</a>
+        <a href="/" class="text-neonCyan hover:underline py-2">← Jeu</a>
+      </nav>
+    </header>
+
+    <section class="bg-cardBg/80 border border-white/10 rounded-2xl p-5 space-y-3">
+      <label class="block text-xs text-slate-400">Token admin (X-Admin-Token) — mémorisé pour cet onglet seulement
+        <input id="token" type="password" autocomplete="off" class="mt-1 w-full min-h-[44px] rounded-xl bg-black/40 border border-white/10 px-3 py-2 text-sm" placeholder="ADMIN_TOKEN" />
+      </label>
+      <div class="flex items-end gap-2 flex-wrap">
+        <label class="block text-xs text-slate-400">Fenêtre
+          <select id="days" class="mt-1 min-h-[44px] rounded-xl bg-black/40 border border-white/10 px-3 py-2 text-sm">
+            <option value="7">7 jours</option>
+            <option value="30" selected>30 jours</option>
+            <option value="90">90 jours</option>
+          </select>
+        </label>
+        <button id="btn-load" type="button" class="min-h-[44px] px-4 rounded-xl bg-neonCyan/20 border border-neonCyan/40 text-neonCyan text-sm font-semibold hover:bg-neonCyan/30">Charger</button>
+        <p id="status" class="text-xs text-slate-500 py-3" aria-live="polite">—</p>
+      </div>
+    </section>
+
+    <!-- Tuiles -->
+    <section id="tiles" class="grid grid-cols-2 sm:grid-cols-4 gap-3" aria-label="Indicateurs clés"></section>
+
+    <!-- Courbe DAU -->
+    <section class="bg-cardBg/80 border border-white/10 rounded-2xl p-5 space-y-3">
+      <div class="flex items-center justify-between gap-3 flex-wrap">
+        <h2 class="font-semibold text-sm text-white">Joueurs actifs par jour (DAU)</h2>
+        <p id="chart-meta" class="text-xs text-slate-500"></p>
+      </div>
+      <div id="chart" class="w-full" role="img" aria-label="Courbe des joueurs actifs par jour"></div>
+    </section>
+
+    <!-- Tableau des événements par jour -->
+    <section class="bg-cardBg/80 border border-white/10 rounded-2xl p-5 space-y-3">
+      <h2 class="font-semibold text-sm text-white">Événements par jour</h2>
+      <div class="overflow-x-auto -mx-2 px-2">
+        <table id="table" class="min-w-full text-xs whitespace-nowrap">
+          <thead><tr id="table-head" class="text-slate-400 border-b border-white/10"></tr></thead>
+          <tbody id="table-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Définitions -->
+    <section class="bg-cardBg/80 border border-white/10 rounded-2xl p-5 space-y-2 text-xs text-slate-400">
+      <h2 class="font-semibold text-sm text-white">Définitions</h2>
+      <ul class="list-disc pl-5 space-y-1">
+        <li><b>DAU</b> : joueurs distincts (identifiant anonyme local) ayant émis <code>daily_started</code> ou <code>daily_completed</code> ce jour-là (jours calendaires America/Toronto, comme les Refs du jour).</li>
+        <li><b>Rétention J+n</b> : cohorte = joueurs dont le <em>premier</em> <code>daily_completed</code> tombe dans la fenêtre et dont le jour J+n est déjà passé. Valeur affichée = % de cette cohorte ayant terminé un daily <em>exactement</em> le jour J+n ; entre parenthèses, % l'ayant fait le jour J+n <em>ou plus tard</em>.</li>
+        <li><b>% parties partagées</b> : couples (joueur, jour) avec <code>share_clicked</code> ÷ couples (joueur, jour) avec <code>daily_completed</code>, sur la fenêtre.</li>
+        <li><b>k-factor approximatif</b> : nombre de <code>share_landed</code> (arrivées <code>?ref=share</code>) ÷ nombre de <code>daily_completed</code>, sur la fenêtre.</li>
+        <li>Les événements sont conservés 180 jours ; les cohortes plus anciennes disparaissent donc de la rétention.</li>
+      </ul>
+    </section>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const TOKEN_KEY = 'music_refs_admin_token';
+    const EVENT_NAMES = [
+      'daily_started', 'daily_completed', 'share_clicked', 'share_landed', 'streak_milestone',
+      'challenge_created', 'challenge_accepted', 'notif_optin', 'quote_submitted',
+    ];
+    const tokenInput = $('token');
+    try {
+      tokenInput.value = sessionStorage.getItem(TOKEN_KEY) || localStorage.getItem(TOKEN_KEY) || '';
+    } catch (_) { /* ignore */ }
+    tokenInput.addEventListener('change', () => {
+      try { sessionStorage.setItem(TOKEN_KEY, tokenInput.value.trim()); } catch (_) { /* ignore */ }
+    });
+
+    const fmtPct = (v) => `${Number(v || 0).toFixed(1).replace('.', ',')} %`;
+    const fmtDay = (iso) => iso.slice(5).replace('-', '/');
+    const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+    function tile(label, value, sub, accent) {
+      const color = accent === 'pink' ? 'text-neonPink' : accent === 'purple' ? 'text-purple-300' : 'text-neonCyan';
+      return `<div class="bg-cardBg/80 border border-white/10 rounded-2xl p-4 min-h-[88px]">
+        <p class="text-[11px] uppercase tracking-wide text-slate-400">${esc(label)}</p>
+        <p class="tile-value font-display text-2xl ${color} mt-1">${esc(value)}</p>
+        ${sub ? `<p class="text-[11px] text-slate-500 mt-1">${esc(sub)}</p>` : ''}
+      </div>`;
+    }
+
+    function renderTiles(s) {
+      const r = s.retention;
+      const ret = (k) => tile(`Rétention ${k.toUpperCase().replace('J', 'J+')}`, fmtPct(r[k].pct),
+        `(${fmtPct(r[k].pct_or_later)} ou plus tard) · cohorte ${r[k].cohort}`, 'purple');
+      $('tiles').innerHTML = [
+        tile('DAU aujourd’hui', s.dau.today, s.to),
+        tile('DAU J-7', s.dau.j7, `moyenne ${String(s.dau.avg).replace('.', ',')} / j`),
+        tile('% parties partagées', fmtPct(s.share.pct), `${s.share.shared_distinct} / ${s.share.games_distinct} parties`, 'pink'),
+        tile('k-factor', String(s.k_factor).replace('.', ','), `${s.totals.share_landed} arrivées / ${s.share.games} parties`, 'pink'),
+        ret('j1'), ret('j7'), ret('j30'),
+        tile('Parties terminées', s.share.games, `sur ${s.days} jours`),
+      ].join('');
+    }
+
+    function renderChart(series) {
+      const W = 640, H = 220, padL = 36, padR = 12, padT = 14, padB = 30;
+      const max = Math.max(1, ...series.map((p) => p.dau));
+      const n = series.length;
+      const x = (i) => padL + (n > 1 ? (i * (W - padL - padR)) / (n - 1) : (W - padL - padR) / 2);
+      const y = (v) => padT + (H - padT - padB) * (1 - v / max);
+      const pts = series.map((p, i) => `${x(i).toFixed(1)},${y(p.dau).toFixed(1)}`);
+      const line = `M${pts.join(' L')}`;
+      const area = `${line} L${x(n - 1).toFixed(1)},${y(0)} L${x(0).toFixed(1)},${y(0)} Z`;
+      const ticks = [0, Math.ceil(max / 2), max].filter((v, i, a) => a.indexOf(v) === i);
+      const labelEvery = Math.max(1, Math.ceil(n / 6));
+      const xLabels = series.map((p, i) => (i % labelEvery === 0 || i === n - 1)
+        ? `<text x="${x(i).toFixed(1)}" y="${H - 8}" text-anchor="middle" font-size="10" fill="#94a3b8">${fmtDay(p.day)}</text>` : '').join('');
+      const dots = series.map((p, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p.dau).toFixed(1)}" r="2.5" fill="#00f0ff"><title>${p.day} : ${p.dau} joueur(s)</title></circle>`).join('');
+      $('chart').innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%" height="auto" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
+        <defs><linearGradient id="g" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#00f0ff" stop-opacity=".35"/><stop offset="1" stop-color="#00f0ff" stop-opacity="0"/></linearGradient></defs>
+        ${ticks.map((v) => `<line x1="${padL}" x2="${W - padR}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" stroke="#ffffff1a" stroke-dasharray="3 3"/><text x="${padL - 6}" y="${(y(v) + 3).toFixed(1)}" text-anchor="end" font-size="10" fill="#94a3b8">${v}</text>`).join('')}
+        <path d="${area}" fill="url(#g)"/>
+        <path d="${line}" fill="none" stroke="#00f0ff" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+        ${dots}${xLabels}
+      </svg>`;
+      $('chart-meta').textContent = `${series[0].day} → ${series[n - 1].day} · pic ${max}`;
+    }
+
+    function renderTable(byDay) {
+      $('table-head').innerHTML = ['Jour', 'DAU', ...EVENT_NAMES].map((h, i) =>
+        `<th class="text-left py-2 pr-3 ${i < 2 ? 'sticky left-0 bg-[#151c2e]' : ''} font-semibold">${esc(h)}</th>`).join('');
+      const rows = byDay.slice().reverse();
+      $('table-body').innerHTML = rows.map((r) => `<tr class="border-b border-white/5 hover:bg-white/5">
+        <td class="py-1.5 pr-3 sticky left-0 bg-[#151c2e] text-slate-300">${esc(r.day)}</td>
+        <td class="py-1.5 pr-3 text-neonCyan font-semibold">${r.dau}</td>
+        ${EVENT_NAMES.map((n) => `<td class="py-1.5 pr-3 ${r.counts[n] ? 'text-slate-200' : 'text-slate-600'}">${r.counts[n] || 0}</td>`).join('')}
+      </tr>`).join('');
+    }
+
+    async function load() {
+      const token = tokenInput.value.trim();
+      if (!token) { $('status').textContent = 'Token admin requis.'; return; }
+      try { sessionStorage.setItem(TOKEN_KEY, token); } catch (_) { /* ignore */ }
+      $('status').textContent = 'Chargement…';
+      try {
+        const res = await fetch(`/api/music-refs/stats?days=${encodeURIComponent($('days').value)}`, {
+          headers: { 'X-Admin-Token': token },
+        });
+        if (res.status === 401) { $('status').textContent = 'Token invalide.'; return; }
+        if (!res.ok) { $('status').textContent = `Erreur ${res.status}.`; return; }
+        const s = await res.json();
+        renderTiles(s);
+        renderChart(s.dau.series);
+        renderTable(s.by_day);
+        $('status').textContent = `Mis à jour · fenêtre ${s.from} → ${s.to}`;
+      } catch (err) {
+        $('status').textContent = `Erreur réseau : ${err.message || err}`;
+      }
+    }
+
+    $('btn-load').addEventListener('click', load);
+    $('days').addEventListener('change', () => { if (tokenInput.value.trim()) load(); });
+    if (tokenInput.value.trim()) load();
+  </script>
+</body>
+</html>

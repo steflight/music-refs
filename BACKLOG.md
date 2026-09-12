@@ -113,7 +113,7 @@ Specs détaillées Given/When/Then : [`docs/backlog-traction-retention-v1.0.md`]
 ### [MR-18] HUD centre + Reset caché
 * **Statut** : 🟢 Fait
 ### [MR-19] Analytics événements
-* **Statut** : 🟢 Fait (light) — `src/services/analytics.js` queue local + plausible hook ; dashboard externe ⚪
+* **Statut** : 🟢 Fait (2026-09-12) — collecte `POST /events` sans cookie, `GET /stats` admin, tableau de bord `/stats.html` (DAU, rétention J1/J7/J30, % partagées, k-factor)
 
 ### [UX-04] Sons — 🟢 · [UX-05] Party mobile — 🟢 · [UX-03] Alias — 🟢
 
@@ -121,10 +121,10 @@ Specs détaillées Given/When/Then : [`docs/backlog-traction-retention-v1.0.md`]
 
 ## Security by design
 
-### [SEC-01] Play sans spoil — 🟡 Partiel (daily OK ; catalogue solo encore exposé)
-### [SEC-02] Score serveur — 🟡 Partiel (daily answer serveur ; solo client)
-### [SEC-03] Party scores — ⚪
-### [SEC-04] Rate-limit — ⚪
+### [SEC-01] Play sans spoil — 🟢 Fait (2026-09-12) : catalogue public sans artiste/titre, `/options` pour le quiz, `/reveal` gardé
+### [SEC-02] Score serveur — 🟢 Fait (2026-09-12) : `POST /quotes/{id}/answer`, demi-points artiste juste, `backend/scoring.py`
+### [SEC-03] Party scores — 🟢 Fait (2026-09-12) : `/parties/{code}/answer` + `/skip`, `score` client ignoré
+### [SEC-04] Rate-limit — 🟢 Fait (2026-09-12) : `backend/ratelimit.py`, `RATE_LIMIT_PER_MINUTE` (120), 429 français
 
 ---
 
@@ -139,23 +139,23 @@ Specs détaillées Given/When/Then : [`docs/backlog-traction-retention-v1.0.md`]
 
 ---
 
-## Écarts constatés vs spec v1.0 (audit du 2026-09-12)
+## Écarts vs spec v1.0 — audit du 2026-09-12 et correction (vague 1, même jour)
 
-Vérifié sur le déploiement live (image = sources, `/health` v1.4.0). Les stories 🟢 ci-dessus sont livrées, avec ces écarts précis :
-
-| Story | Critère de la spec | État | Suite |
+| Story | Critère de la spec | Audit matin | Après vague 1 |
 |---|---|---|---|
-| MR-04 / SEC-01 | Réponses accessibles **seulement après** la 5e citation | 🔴 `GET /daily/reveal` renvoie artiste + titre à n'importe quel `player_id`, même sans résultat enregistré | Exiger un `daily_results` complet pour ce joueur (ou n'exposer `reveals` que dans la réponse de `POST /result`) |
-| MR-06 | Pastille « Série en danger » après 20 h locale si set non commencé | ⚪ Non implémenté | Petit ajout front (`dailyStore.js` + en-tête `daily.html`) |
-| MR-09 | Multiplicateurs ×1 / ×2 / ×3 | 🟡 Implémenté ×1 / ×1.5 / ×2 (`backend/daily.py`) | Décision produit : aligner sur la spec ou entériner la version douce |
-| MR-12 | Filtre de mots interdits sur le pseudo | ⚪ Absent (3–16 caractères seulement) | Liste courte FR/EN côté serveur dans `POST /result` |
-| MR-03 | `navigator.canShare` avant `navigator.share` | 🟡 `navigator.share` testé directement (fonctionne, moins robuste) | Cosmétique |
-| MR-03 | Lien du bloc `music-refs.kladriva.ca` | 🟡 Lien QA `music-refs-dev.kladriva.ca/daily.html?ref=share` en dur | Basculer en `location.origin` au passage en prod |
-| MR-13 | Onglet « Amis » du classement | ⚪ Non implémenté | Dépend d'un lien joueur ↔ salon |
-| MR-14 | Notification « Karim a fait 5/5 » | ⚪ Dépend de MR-08 (Web Push) | Sprint 3 |
-| MR-19 | Tableau de bord DAU / rétention / k-factor | ⚪ Événements émis, pas de dashboard | Brancher Plausible ou Umami |
+| MR-04 / SEC-01 | Réponses accessibles seulement après la 5e citation | 🔴 `GET /daily/reveal` ouvert à tous | 🟢 403 sans résultat complet ; `/answer` ne révèle plus rien ; réponses suivies serveur (`daily_answers`) |
+| MR-06 | Pastille « Série en danger » après 20 h | ⚪ | 🟢 `isStreakInDanger` + rendu ambre aria-live |
+| MR-09 | Multiplicateurs ×1 / ×2 / ×3 | 🟡 ×1 / ×1,5 / ×2 | 🟢 ×1 / ×2 / ×3, indices 20/40/60, appliqué aussi au solo et au salon |
+| MR-12 | Filtre de mots interdits sur le pseudo | ⚪ | 🟢 `backend/moderation.py` (FR/EN, accents, leet), 422 « Ce pseudo n'est pas autorisé » |
+| MR-13 | Anti-triche : temps < 3 s/citation, score vérifié serveur | 🟡 | 🟢 400 « Temps trop court » / « Score incohérent… » ; score recalculé depuis les réponses serveur |
+| MR-03 | `navigator.canShare`, lien du bloc sur l'origine courante | 🟡 | 🟢 |
+| MR-19 | Tableau de bord DAU / rétention / k-factor | ⚪ | 🟢 `POST /events`, `GET /stats` (admin), page `/stats.html` |
+| MR-13 | Onglet « Amis » du classement | ⚪ | ⚪ vague 3 |
+| MR-14 | Notification « Karim a fait 5/5 » | ⚪ | ⚪ vague 2 (avec MR-08) |
 
-Tests (2026-09-12) : `vitest` 7/7 après mise à jour du test de normalisation (MR-11) ; `unittest` 13/15 — les 2 échecs sont des chemins de sandbox ADA codés en dur (`/workspace/music-refs/...`), pas des régressions.
+Preuve vague 1 (déploiement réel, joueur neuf) : `reveal` avant → 403, 5 × `/answer` sans fuite, `time_ms=1000` → 400, pseudo `m3rde` → 422, score 999 → 400, résultat honnête → 200 `complete:true` + 5 révélations, `reveal` après → 200, défi → code créé.
+
+Tests vague 1 : pytest backend 74/74 ; vitest 40/40 ; unittest racine 13/15 (2 échecs = chemins sandbox ADA codés en dur).
 
 Hygiène : `certs/music-refs-dev.kladriva.ca.key` (auto-signée, QA) est versionnée depuis `436e34e` ; à sortir de l'historique avant tout passage public du dépôt.
 
