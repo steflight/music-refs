@@ -343,6 +343,8 @@
       <span class="mx-1">·</span>
       <a href="/party.html" class="text-neonPink hover:underline py-1 inline-block">Partie amis</a>
       <span class="mx-1">·</span>
+      <a href="/profil" class="text-slate-400 hover:text-neonCyan hover:underline py-1 inline-block">Mon profil</a>
+      <span class="mx-1">·</span>
       <a href="/admin.html" class="text-purple-400 hover:underline py-1 inline-block">Admin</a>
       <span class="mx-1">·</span>
       <button type="button" id="btn-reset" class="text-gray-600 hover:text-red-400 underline-offset-2 hover:underline py-1">Réinitialiser le score</button>
@@ -370,6 +372,7 @@
   <script type="module">
     import { GameEngine, loadQuotesFromApi, loadCategories, loadQuizOptions, submitSoloAnswer, revealSoloQuote } from './src/services/gameService.js';
     import { bindSfxToggle, playSuccess, playPartial, playError, playStreak, unlockSfx } from './src/services/sfx.js';
+    import { record as recordProfile } from './src/services/profileStore.js'; // MR-15
 
     bindSfxToggle();
     // SEC-02 : le verdict (artiste/titre justes, points) est calculé par le serveur ;
@@ -644,6 +647,17 @@
         if (game.titleGuessed) inputTitle.disabled = true;
 
         if (res.isFullyGuessed) {
+          // MR-15 : profil local — citation trouvée (avec ou sans indice)
+          try {
+            const pq = game.currentQuote || {};
+            recordProfile({
+              quoteId: pq.id,
+              categoryIds: pq.category_ids || [],
+              rarity: pq.rarity || 'commune',
+              outcome: game.revealedHints.size > 0 ? 'hint' : 'correct',
+              mode: 'solo',
+            });
+          } catch (_) { /* profil non bloquant */ }
           const reveal = res.reveal || game.reveal || {};
           revealArtist.textContent = reveal.artist || '—';
           revealTitle.textContent = reveal.title || '—';
@@ -673,6 +687,10 @@
       const q = game.currentQuote;
       let delay = 0;
       if (q && (!game.artistGuessed || !game.titleGuessed)) {
+        // MR-15 : profil local — citation passée
+        try {
+          recordProfile({ quoteId: q.id, categoryIds: q.category_ids || [], rarity: q.rarity || 'commune', outcome: 'skipped', mode: 'solo' });
+        } catch (_) { /* profil non bloquant */ }
         btnNext.disabled = true;
         let reveal = game.reveal;
         if (!reveal) {

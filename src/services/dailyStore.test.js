@@ -167,3 +167,67 @@ describe('Contrat API lot A — helpers', () => {
     expect(apiErrorMessage(null, 'Repli')).toBe('Repli');
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* MR-08 — Rappel quotidien (Web Push)                                 */
+/* ------------------------------------------------------------------ */
+import {
+  countCompletedDailies, pushOptinEligible, getPushPref, setPushPref, PUSH_PREF_KEY,
+  urlBase64ToUint8Array, pushSupported, pushSettingLabel,
+} from './dailyStore.js';
+
+describe('MR-08 push helpers', () => {
+  it('countCompletedDailies compte seulement les snapshots mr:daily:* complétés', () => {
+    const st = memStorage({
+      'mr:daily:2026-09-10:all': JSON.stringify({ completed: true, cells: ['🟩'] }),
+      'mr:daily:2026-09-11:all': JSON.stringify({ completed: false, cells: ['🟩'] }),
+      'mr:daily:2026-09-12:cat:3': JSON.stringify({ completed: true }),
+      'mr:daily:2026-09-09:all': 'pas du json',
+      'mr:streak': JSON.stringify({ currentStreak: 3 }),
+    });
+    expect(countCompletedDailies(st)).toBe(2);
+    expect(countCompletedDailies(memStorage())).toBe(0);
+    expect(countCompletedDailies(null)).toBe(0);
+  });
+
+  it("pushOptinEligible : jamais à la première partie, oui à partir de la 2e", () => {
+    expect(pushOptinEligible(0)).toBe(false);
+    expect(pushOptinEligible(1)).toBe(false);
+    expect(pushOptinEligible(2)).toBe(true);
+    expect(pushOptinEligible('5')).toBe(true);
+  });
+
+  it('getPushPref / setPushPref persistent le réglage', () => {
+    const st = memStorage();
+    expect(getPushPref(st)).toEqual({ enabled: false, endpoint: null, tz: null, everAsked: false });
+    setPushPref({ enabled: true, endpoint: 'https://push.example/1', tz: 'America/Toronto' }, st);
+    expect(JSON.parse(st.getItem(PUSH_PREF_KEY)).enabled).toBe(true);
+    expect(getPushPref(st).tz).toBe('America/Toronto');
+    setPushPref({ enabled: false }, st);
+    expect(getPushPref(st)).toMatchObject({ enabled: false, endpoint: 'https://push.example/1' });
+    st.setItem(PUSH_PREF_KEY, '{oops');
+    expect(getPushPref(st).enabled).toBe(false);
+  });
+
+  it('urlBase64ToUint8Array décode une clé VAPID base64url (65 octets, préfixe 0x04)', () => {
+    const key = 'BKrPi8s6u7dnqEpi8ku1nDOQk89AAPb2zZnxI0INXoO51QktC-p7Wos9jGUg8PawCrki_mBB6N4586VwsvQKiJs';
+    const bytes = urlBase64ToUint8Array(key);
+    expect(bytes).toBeInstanceOf(Uint8Array);
+    expect(bytes.length).toBe(65);
+    expect(bytes[0]).toBe(0x04);
+    expect(urlBase64ToUint8Array('AQID').length).toBe(3);
+  });
+
+  it('pushSupported exige Notification + PushManager + serviceWorker', () => {
+    const nav = { serviceWorker: {} };
+    expect(pushSupported({ Notification: {}, PushManager: {}, isSecureContext: true }, nav)).toBe(true);
+    expect(pushSupported({ Notification: {}, isSecureContext: true }, nav)).toBe(false); // iOS Safari non installé
+    expect(pushSupported({ Notification: {}, PushManager: {} }, {})).toBe(false);
+    expect(pushSupported(null, null)).toBe(false);
+  });
+
+  it('pushSettingLabel', () => {
+    expect(pushSettingLabel(true)).toBe('Rappel quotidien : activé');
+    expect(pushSettingLabel(false)).toBe('Rappel quotidien : désactivé');
+  });
+});

@@ -64,7 +64,7 @@ Specs détaillées Given/When/Then : [`docs/backlog-traction-retention-v1.0.md`]
 * 1 gratuit, +1 / 7 j de série, max 2 · consommation auto si 1 jour manqué · HUD 🧊.
 
 ### [MR-08] Rappel push PWA
-* **Statut** : 🟡 Partiel — `manifest.webmanifest` + `sw.js` (cache shell) ; **pas** de Web Push VAPID 19 h.
+* **Statut** : 🟢 Fait (2026-09-12) — Web Push VAPID : `POST/DELETE /push/subscribe`, planificateur 19 h locale par fuseau, opt-in après la 2e partie, réglage, `sw.js` push/notificationclick, manifest + icônes. Clés dans `.env` (`scripts/gen_vapid.py`).
 
 ---
 
@@ -94,17 +94,21 @@ Specs détaillées Given/When/Then : [`docs/backlog-traction-retention-v1.0.md`]
 * Top 10 UI écran de fin · départage score → hints → time_ms · API `/result` + `/leaderboard`.
 
 ### [MR-14] Défi asynchrone
-* **Statut** : 🟢 Fait (2026-09-10)  
-* `POST /daily/challenge` · `/d/<code>` · comparaison scores sur écran de fin.
+* **Statut** : 🟢 Fait (2026-09-10, notification 2026-09-12)  
+* `POST /daily/challenge` · `/d/<code>` · comparaison scores sur écran de fin · notification push au créateur « X a fait N/5 sur ton défi 😱 » (`challenge_code` dans `POST /result`, un envoi par défi).
 
-### [MR-15] Profil culture — ⚪ P2
+### [MR-15] Profil culture
+* **Statut** : 🟢 Fait (2026-09-12) — page `/profil` (alias `/profil.html`), historique local `mr:profile` (≤ 2 000 entrées, `src/services/profileStore.js`), barres SVG par catégorie, grade (seuils 40/70/90 %), meilleure série, légendaires ; PNG story 1080×1920 via canvas. Seuil : 20 citations répondues (daily + solo).
+* Écart : agrégats 100 % locaux au navigateur (aucune API serveur) — un changement d'appareil repart de zéro.
 
 ---
 
 ## Épic 5 — Contenu communautaire
 
-### [MR-16] Proposer punchline — ⚪ P2
-### [MR-17] Vote 🔥/👎 — ⚪ P2
+### [MR-16] Proposer punchline — 🟢 Fait (2026-09-12)
+* `/proposer` · `POST /submissions` (doublon 409, lien d'écoute filtré, pseudo modéré, 10/jour) · admin « Propositions » approve/reject · +50 points + badge `contributeur` (`GET /players/{id}/rewards`) · « Proposée par » à la révélation.
+### [MR-17] Vote 🔥/👎 — 🟢 Fait (2026-09-12)
+* `POST /quotes/{id}/vote` (un vote/joueur, revotable, 403 si non jouée) · `GET /quotes/flagged` (≥ 30 votes, 👎 > 40 %) · admin « Signalées ».
 
 ---
 
@@ -151,11 +155,11 @@ Specs détaillées Given/When/Then : [`docs/backlog-traction-retention-v1.0.md`]
 | MR-03 | `navigator.canShare`, lien du bloc sur l'origine courante | 🟡 | 🟢 |
 | MR-19 | Tableau de bord DAU / rétention / k-factor | ⚪ | 🟢 `POST /events`, `GET /stats` (admin), page `/stats.html` |
 | MR-13 | Onglet « Amis » du classement | ⚪ | ⚪ vague 3 |
-| MR-14 | Notification « Karim a fait 5/5 » | ⚪ | ⚪ vague 2 (avec MR-08) |
+| MR-14 | Notification « Karim a fait 5/5 » | ⚪ | 🟢 vague 2 (push au créateur) |
 
 Preuve vague 1 (déploiement réel, joueur neuf) : `reveal` avant → 403, 5 × `/answer` sans fuite, `time_ms=1000` → 400, pseudo `m3rde` → 422, score 999 → 400, résultat honnête → 200 `complete:true` + 5 révélations, `reveal` après → 200, défi → code créé.
 
-Tests vague 1 : pytest backend 74/74 ; vitest 40/40 ; unittest racine 13/15 (2 échecs = chemins sandbox ADA codés en dur).
+Tests vague 1 : pytest backend 74/74 ; vitest 40/40. Vague 2 (MR-08/14/15/16/17) : pytest 105/105 ; vitest 65/65 ; preuve live : soumission 201 → doublon 409 → approbation → +50 points/badge, vote sans jeu 403, abonnement push aller-retour, pages `/proposer` `/profil` en HTTPS 200 ; unittest racine 13/15 (2 échecs = chemins sandbox ADA codés en dur).
 
 Hygiène : `certs/music-refs-dev.kladriva.ca.key` (auto-signée, QA) est versionnée depuis `436e34e` ; à sortir de l'historique avant tout passage public du dépôt.
 

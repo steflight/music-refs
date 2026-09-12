@@ -9,10 +9,15 @@ from config import get_settings
 from db import init_db, seed_from_json
 from ratelimit import RateLimitMiddleware
 from routes.categories import router as categories_router
+from routes.community import router as community_router
 from routes.daily import router as daily_router
 from routes.events import router as events_router
 from routes.parties import router as parties_router
+from routes.push import router as push_router
 from routes.quotes import router as quotes_router
+import push
+import logging
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
 AVAILABLE_ENDPOINTS = [
     "GET /",
@@ -39,12 +44,22 @@ AVAILABLE_ENDPOINTS = [
     "DELETE /api/music-refs/quotes/{id}",
     "POST /api/music-refs/events",
     "GET /api/music-refs/stats?days=30",
+    "GET /api/music-refs/push/public-key",
+    "POST /api/music-refs/push/subscribe",
+    "DELETE /api/music-refs/push/subscribe",
+    "POST /api/music-refs/submissions",
+    "GET /api/music-refs/submissions?status=pending",
+    "POST /api/music-refs/submissions/{id}/approve",
+    "POST /api/music-refs/submissions/{id}/reject",
+    "GET /api/music-refs/players/{player_id}/rewards",
+    "POST /api/music-refs/quotes/{id}/vote",
+    "GET /api/music-refs/quotes/flagged",
 ]
 
 app = FastAPI(
     title="Music Refs API",
     description="Punchlines, catégories, parties & Refs du jour",
-    version="1.4.0",
+    version="1.5.0",
 )
 
 settings = get_settings()
@@ -59,11 +74,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Lot F avant `quotes` : `GET /quotes/flagged` ne doit pas être capté par `GET /quotes/{quote_id}`.
+app.include_router(community_router)
 app.include_router(quotes_router)
 app.include_router(categories_router)
 app.include_router(parties_router)
 app.include_router(daily_router)
 app.include_router(events_router)
+app.include_router(push_router)
 
 
 def frontend_root() -> Path:
@@ -88,9 +106,20 @@ def on_startup() -> None:
     seed_from_json(seed_path)
 
 
+@app.on_event("startup")
+async def start_push_scheduler() -> None:
+    """MR-08 — rappel quotidien Web Push (tick chaque minute). Sans clés VAPID : log + désactivé."""
+    push.start_scheduler()
+
+
+@app.on_event("shutdown")
+async def stop_push_scheduler() -> None:
+    await push.stop_scheduler()
+
+
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok", "service": "Music Refs API", "version": "1.4.0"}
+    return {"status": "ok", "service": "Music Refs API", "version": "1.5.0"}
 
 
 @app.get("/")
@@ -98,7 +127,7 @@ async def root(request: Request):
     accept = (request.headers.get("accept") or "").lower()
     wants_json = "application/json" in accept and "text/html" not in accept
     if wants_json:
-        return JSONResponse({"status": "ok", "service": "Music Refs API", "version": "1.4.0"})
+        return JSONResponse({"status": "ok", "service": "Music Refs API", "version": "1.5.0"})
     index = FRONT / "index.html"
     if index.exists():
         return HTMLResponse(index.read_text(encoding="utf-8"))
@@ -150,6 +179,37 @@ async def stats_page():
     )
 
 
+@app.get("/proposer.html")
+@app.get("/proposer")
+async def proposer_page():
+    """MR-16 — formulaire « Proposer une punchline »."""
+    page = FRONT / "proposer.html"
+    if page.exists():
+        return FileResponse(page)
+    return JSONResponse(
+        {"error": "Not Found", "status_code": 404, "available_endpoints": AVAILABLE_ENDPOINTS},
+        status_code=404,
+    )
+
+
+@app.get("/profil.html")
+async def profil_page():
+    """MR-15 — profil de culture musicale (agrégats locaux, page statique)."""
+    page = FRONT / "profil.html"
+    if page.exists():
+        return FileResponse(page)
+    return JSONResponse(
+        {"error": "Not Found", "status_code": 404, "available_endpoints": AVAILABLE_ENDPOINTS},
+        status_code=404,
+    )
+
+
+@app.get("/profil")
+async def profil_alias():
+    """MR-15 — alias court `/profil`."""
+    return await profil_page()
+
+
 @app.get("/d/{code}")
 async def challenge_page(code: str):
     """MR-14 — défi asynchrone : redirige vers daily avec le code."""
@@ -197,3 +257,5 @@ async def not_found_handler(request: Request, exc):  # noqa: ARG001
 
 if (FRONT / "src").is_dir():
     app.mount("/src", StaticFiles(directory=str(FRONT / "src")), name="src")
+if (FRONT / "icons").is_dir():
+    app.mount("/icons", StaticFiles(directory=str(FRONT / "icons")), name="icons")

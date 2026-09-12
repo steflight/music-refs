@@ -15,6 +15,7 @@ from daily import (
     seconds_until_next_midnight_toronto,
     today_toronto,
 )
+import push
 from db import (
     count_daily_players,
     create_daily_challenge,
@@ -25,8 +26,10 @@ from db import (
     get_daily_set_row,
     get_db,
     get_or_create_daily_set,
+    get_player_vote,
     get_quote,
     has_complete_daily_result,
+    mark_challenge_notified,
     new_challenge_code,
     quote_play_view,
     quote_reveal_view,
@@ -102,12 +105,16 @@ def _resolve_category(
     return f"cat:{category_id}", category_id, row["name"]
 
 
-def _reveals_for_set(conn, quote_ids: list[int]) -> list[dict]:
+def _reveals_for_set(conn, quote_ids: list[int], player_id: str | None = None) -> list[dict]:
+    """Réponses dévoilées ; inclut `contributor_pseudo` (MR-16) et `my_vote`
+    (MR-17 : 1, -1 ou null) pour le joueur donné."""
     out = []
     for qid in quote_ids:
         q = get_quote(conn, qid)
         if q:
-            out.append(quote_reveal_view(q))
+            view = quote_reveal_view(q)
+            view["my_vote"] = get_player_vote(conn, qid, player_id)
+            out.append(view)
     return out
 
 
@@ -307,7 +314,26 @@ def post_result(body: DailyResultIn):
                 break
 
         # MR-04 / SEC-01 : réponses dévoilées seulement si le set est complet
-        reveals: list[dict] = _reveals_for_set(conn, dset["quote_ids"]) if complete else []
+        reveals: list[dict] = _reveals_for_set(conn, dset["quote_ids"], body.player_id) if complete else []
+
+        # MR-14 : l'ami vient de terminer le set d'un défi → notifier le créateur (une fois par défi)
+        challenge_to_notify = None
+        if complete and body.challenge_code:
+            ch = get_daily_challenge(conn, body.challenge_code)
+            if (
+                ch
+                and ch["date"] == day_iso
+                and ch["category_key"] == cat_key
+                and ch["creator_player_id"] != body.player_id
+                and mark_challenge_notified(conn, ch["code"])
+            ):
+                challenge_to_notify = ch
+
+    if challenge_to_notify:
+        try:
+            push.notify_challenge_completed(challenge_to_notify, pseudo, server_correct)
+        except Exception:  # la notification ne doit jamais faire échouer le résultat
+            pass
 
     return {
         "ok": True,
@@ -372,7 +398,7 @@ def get_reveal(
             "date": day_iso,
             "category_key": cat_key,
             "edition": dset["edition"],
-            "reveals": _reveals_for_set(conn, dset["quote_ids"]),
+            "reveals": _reveals_for_set(conn, dset["quote_ids"], player_id),
         }
 
 

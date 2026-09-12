@@ -18,6 +18,7 @@ class QuoteOut(BaseModel):
     hints: Hints
     listen_url: str = ""
     rarity: str = "commune"
+    contributor_pseudo: str = ""
     category_ids: list[int] = Field(default_factory=list)
 
 
@@ -156,6 +157,8 @@ class DailyResultIn(BaseModel):
     date: str | None = None
     category_id: int | None = None
     category_key: str | None = None
+    # MR-14 : code du défi joué (si le joueur est arrivé par /d/<code>) → notification au créateur
+    challenge_code: str | None = Field(default=None, max_length=16, pattern=r"^[A-Za-z0-9]+$")
 
 
 class DailyChallengeCreateIn(BaseModel):
@@ -223,3 +226,131 @@ class PartyAnswerIn(BaseModel):
 class PartySkipIn(BaseModel):
     player_token: str = Field(min_length=8, max_length=80)
     quote_id: int
+
+
+# --- Lot F : contenu communautaire (MR-16 propositions, MR-17 votes) --------
+
+
+class SubmissionIn(BaseModel):
+    """Proposition d'une punchline par un joueur (`/proposer`)."""
+
+    quote: str = Field(min_length=10, max_length=300)
+    artist: str = Field(min_length=1, max_length=120)
+    title: str = Field(min_length=1, max_length=120)
+    category_id: int
+    year: int | None = Field(default=None, ge=1900, le=2100)
+    listen_url: str | None = Field(default=None, max_length=500)
+    player_id: str = Field(min_length=8, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
+    pseudo: str = Field(default="", max_length=200)
+
+
+class SubmissionOut(BaseModel):
+    id: int
+    quote: str
+    artist: str
+    title: str
+    category_id: int | None = None
+    year: str = ""
+    listen_url: str = ""
+    player_id: str
+    pseudo: str = ""
+    status: str
+    reason: str = ""
+    quote_id: int | None = None
+    created_at: str = ""
+    reviewed_at: str | None = None
+
+
+class SubmissionCreatedOut(BaseModel):
+    id: int
+    status: str
+    message: str
+
+
+class SubmissionListOut(BaseModel):
+    items: list[SubmissionOut]
+    counts: dict[str, int]
+
+
+class SubmissionApproveIn(BaseModel):
+    rarity: str | None = Field(default=None, pattern="^(commune|rare|legendaire)$")
+
+
+class SubmissionRejectIn(BaseModel):
+    reason: str = Field(default="", max_length=500)
+
+
+class PlayerRewardsOut(BaseModel):
+    player_id: str
+    points: int = 0
+    badges: list[str] = Field(default_factory=list)
+
+
+class SubmissionApproveOut(BaseModel):
+    submission: SubmissionOut
+    quote: QuoteOut
+    rewards: PlayerRewardsOut
+
+
+class QuoteVoteIn(BaseModel):
+    player_id: str = Field(min_length=8, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
+    value: int = Field(description="1 = 🔥, -1 = 👎")
+
+
+class QuoteVoteOut(BaseModel):
+    quote_id: int
+    my_vote: int
+    up: int
+    down: int
+    total: int
+
+
+class FlaggedQuoteOut(BaseModel):
+    id: int
+    quote: str
+    artist: str
+    title: str
+    rarity: str = "commune"
+    contributor_pseudo: str = ""
+    up: int
+    down: int
+    total: int
+    down_ratio: float
+
+
+# --- MR-08 / MR-14 : Web Push ---------------------------------------------
+
+
+class PushKeys(BaseModel):
+    p256dh: str = Field(min_length=16, max_length=256)
+    auth: str = Field(min_length=8, max_length=128)
+
+
+class PushSubscription(BaseModel):
+    endpoint: str = Field(min_length=16, max_length=2048, pattern=r"^https://")
+    keys: PushKeys
+    expirationTime: int | float | None = None
+
+
+class PushSubscribeIn(BaseModel):
+    player_id: str = Field(min_length=8, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
+    subscription: PushSubscription
+    tz: str = Field(default="America/Toronto", max_length=64)
+    streak: int | None = Field(default=None, ge=0, le=100_000, description="Série connue du client (optionnel)")
+
+
+class PushUnsubscribeIn(BaseModel):
+    endpoint: str = Field(min_length=16, max_length=2048)
+
+
+class PushSubscribeOut(BaseModel):
+    ok: bool
+    id: int
+    tz: str
+    enabled: bool
+
+
+class PushPublicKeyOut(BaseModel):
+    enabled: bool
+    public_key: str
+    reminder_hour: int

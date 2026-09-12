@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="fr" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0f19">
+  <meta name="description" content="Mon profil de culture musicale — Music Refs">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <title>Music Refs — Mon profil</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;900&family=Orbitron:wght@700;900&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Montserrat', 'sans-serif'], display: ['Orbitron', 'sans-serif'] },
+          colors: { neonPink: '#ff007f', neonCyan: '#00f0ff' }
+        }
+      }
+    }
+  </script>
+  <style>
+    :root { --safe-top: env(safe-area-inset-top,0px); --safe-bottom: env(safe-area-inset-bottom,0px); }
+    body {
+      background: #0b0f19;
+      background-image:
+        radial-gradient(at 15% 10%, rgba(255,0,127,.14), transparent 45%),
+        radial-gradient(at 85% 90%, rgba(0,240,255,.1), transparent 45%);
+      padding-top: max(.75rem, var(--safe-top));
+      padding-bottom: max(.75rem, var(--safe-bottom));
+      min-height: 100dvh;
+      overflow-x: hidden;
+    }
+    button, a.tap { font-size: 16px; touch-action: manipulation; }
+    .tap { min-height: 48px; }
+    .panel { background: rgba(21,28,46,.9); backdrop-filter: blur(12px); }
+    /* Barres SVG : la largeur est animée en CSS, désactivée sous prefers-reduced-motion */
+    .bar-fill { transition: width .6s ease; }
+    @media (prefers-reduced-motion: reduce) {
+      .bar-fill { transition: none; }
+    }
+  </style>
+</head>
+<body class="text-slate-200 font-sans px-3 py-3 sm:p-6">
+  <div class="max-w-xl mx-auto space-y-4">
+    <header class="flex items-center justify-between gap-2">
+      <div class="min-w-0">
+        <p class="text-[10px] uppercase tracking-widest text-slate-500">Culture musicale</p>
+        <h1 class="font-display text-xl sm:text-2xl text-transparent bg-clip-text bg-gradient-to-r from-neonPink to-neonCyan truncate">Mon profil</h1>
+      </div>
+      <div class="flex items-center gap-2 shrink-0">
+        <a href="/daily.html" class="tap inline-flex items-center px-3 rounded-xl border border-neonPink/40 text-neonPink text-sm font-semibold">Refs du jour</a>
+        <a href="/" class="tap inline-flex items-center px-3 rounded-xl border border-white/15 text-sm">Infini</a>
+      </div>
+    </header>
+
+    <!-- Pas encore assez de citations -->
+    <section id="locked" class="hidden panel rounded-2xl border border-white/10 p-5 space-y-4 text-center">
+      <p class="text-4xl" aria-hidden="true">🎧</p>
+      <h2 class="font-display text-lg text-neonCyan">Encore <span id="locked-n">20</span> citations avant ton profil</h2>
+      <p class="text-sm text-slate-400">Ton profil se construit à chaque citation jouée, dans les Refs du jour comme en mode infini. Progression : <span id="locked-progress" class="text-white font-semibold">0 / 20</span>.</p>
+      <svg class="w-full h-3" viewBox="0 0 100 8" preserveAspectRatio="none" role="img" aria-label="Progression vers le profil">
+        <rect x="0" y="0" width="100" height="8" rx="4" fill="rgba(255,255,255,.08)"/>
+        <rect id="locked-bar" class="bar-fill" x="0" y="0" width="0" height="8" rx="4" fill="#00f0ff"/>
+      </svg>
+      <a href="/daily.html" class="tap inline-flex items-center justify-center w-full rounded-xl bg-gradient-to-r from-neonPink to-purple-600 font-semibold text-white">Jouer les Refs du jour</a>
+    </section>
+
+    <!-- Profil -->
+    <section id="profile" class="hidden space-y-4">
+      <div class="panel rounded-2xl border border-neonPink/30 p-5 space-y-2 text-center">
+        <p id="p-pseudo" class="hidden text-sm text-slate-400"></p>
+        <p class="text-[10px] uppercase tracking-widest text-slate-500">Grade</p>
+        <h2 id="p-grade" class="font-display text-xl sm:text-2xl text-transparent bg-clip-text bg-gradient-to-r from-neonPink to-neonCyan break-words"></h2>
+        <p id="p-rate" class="text-sm text-slate-300"></p>
+      </div>
+
+      <div class="grid grid-cols-3 gap-2">
+        <div class="panel rounded-2xl border border-neonPink/30 p-3 text-center">
+          <p class="text-[10px] uppercase tracking-wider text-neonPink/80 font-semibold">Série</p>
+          <p id="p-streak" class="font-display text-2xl text-neonPink">0</p>
+          <p class="text-[10px] text-slate-500">meilleure</p>
+        </div>
+        <div class="panel rounded-2xl border border-purple-400/40 p-3 text-center">
+          <p class="text-[10px] uppercase tracking-wider text-purple-300/80 font-semibold">Légendaires</p>
+          <p id="p-legend" class="font-display text-2xl text-purple-300">0</p>
+          <p class="text-[10px] text-slate-500">trouvées</p>
+        </div>
+        <div class="panel rounded-2xl border border-neonCyan/30 p-3 text-center">
+          <p class="text-[10px] uppercase tracking-wider text-neonCyan/80 font-semibold">Joué</p>
+          <p id="p-total" class="font-display text-2xl text-neonCyan">0</p>
+          <p class="text-[10px] text-slate-500">citations</p>
+        </div>
+      </div>
+
+      <div class="panel rounded-2xl border border-white/10 p-4 space-y-3">
+        <h3 class="font-semibold text-sm text-white">Réussite par catégorie</h3>
+        <p class="text-[11px] text-slate-500">Trouvée avec ou sans indice / jouée. Grade de catégorie à partir de 5 citations jouées.</p>
+        <ul id="p-cats" class="space-y-3"></ul>
+      </div>
+
+      <div class="grid gap-2">
+        <button type="button" id="btn-download" class="tap w-full rounded-xl bg-gradient-to-r from-neonPink to-purple-600 font-semibold text-white">Télécharger l'image</button>
+        <p id="dl-status" aria-live="polite" class="hidden text-xs text-center text-slate-400"></p>
+      </div>
+      <canvas id="story" width="1080" height="1920" class="hidden" aria-hidden="true"></canvas>
+    </section>
+
+    <p id="toast" aria-live="polite" class="text-center text-xs text-amber-300 min-h-[1rem]"></p>
+  </div>
+
+  <script type="module">
+    import { getPlayer } from './src/services/dailyStore.js';
+    import {
+      loadHistory, computeProfile, fetchCategoryNames, getBestStreak, PROFILE_MIN_ANSWERS,
+    } from './src/services/profileStore.js';
+
+    const $ = (id) => document.getElementById(id);
+    const SITE_URL = 'music-refs.kladriva.ca';
+    const reducedMotion = () => {
+      try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (_) { return false; }
+    };
+
+    function escapeHtml(s) {
+      return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+
+    function renderLocked(profile) {
+      $('locked').classList.remove('hidden');
+      $('profile').classList.add('hidden');
+      $('locked-n').textContent = profile.remaining;
+      $('locked-progress').textContent = `${profile.total} / ${PROFILE_MIN_ANSWERS}`;
+      const w = Math.min(100, Math.round((profile.total / PROFILE_MIN_ANSWERS) * 100));
+      const bar = $('locked-bar');
+      if (reducedMotion()) bar.setAttribute('width', w);
+      else requestAnimationFrame(() => bar.setAttribute('width', w));
+    }
+
+    /** Barre horizontale SVG inline (sans librairie). */
+    function barSvg(pct, id) {
+      const p = Math.max(0, Math.min(100, Number(pct) || 0));
+      return `
+        <svg class="w-full h-3" viewBox="0 0 100 8" preserveAspectRatio="none" role="img" aria-label="${p} % de réussite">
+          <defs>
+            <linearGradient id="g-${id}" x1="0" x2="1" y1="0" y2="0">
+              <stop offset="0" stop-color="#ff007f"/><stop offset="1" stop-color="#00f0ff"/>
+            </linearGradient>
+          </defs>
+          <rect x="0" y="0" width="100" height="8" rx="4" fill="rgba(255,255,255,.08)"/>
+          <rect class="bar-fill" data-w="${p}" x="0" y="0" width="${reducedMotion() ? p : 0}" height="8" rx="4" fill="url(#g-${id})"/>
+        </svg>`;
+    }
+
+    function renderProfile(profile, pseudo) {
+      $('locked').classList.add('hidden');
+      $('profile').classList.remove('hidden');
+      if (pseudo) {
+        $('p-pseudo').textContent = pseudo;
+        $('p-pseudo').classList.remove('hidden');
+      }
+      $('p-grade').textContent = profile.mainGrade.title;
+      $('p-rate').textContent = `${profile.ratePct} % de réussite · ${profile.found} trouvées sur ${profile.total}`;
+      $('p-streak').textContent = profile.bestStreak;
+      $('p-legend').textContent = profile.legendaryFound;
+      $('p-total').textContent = profile.total;
+
+      const ul = $('p-cats');
+      ul.innerHTML = '';
+      profile.categories.forEach((c, i) => {
+        const li = document.createElement('li');
+        li.className = 'space-y-1';
+        li.innerHTML = `
+          <div class="flex items-baseline justify-between gap-2 text-sm">
+            <span class="truncate font-semibold text-white">${escapeHtml(c.name)}</span>
+            <span class="shrink-0 font-mono text-neonCyan">${c.ratePct} %</span>
+          </div>
+          ${barSvg(c.ratePct, i)}
+          <p class="text-[11px] text-slate-500">${c.found}/${c.played} trouvées${c.grade ? ` · ${escapeHtml(c.grade.label)}` : ''}</p>`;
+        ul.appendChild(li);
+      });
+      if (!reducedMotion()) {
+        requestAnimationFrame(() => {
+          ul.querySelectorAll('.bar-fill').forEach((r) => r.setAttribute('width', r.dataset.w));
+        });
+      }
+    }
+
+    /* ---------- Image « story » 1080×1920 via canvas ---------- */
+    const FONT = 'Montserrat, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+    const FONT_DISPLAY = 'Orbitron, Montserrat, system-ui, sans-serif';
+
+    function roundRect(ctx, x, y, w, h, r) {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.arcTo(x + w, y, x + w, y + h, r);
+      ctx.arcTo(x + w, y + h, x, y + h, r);
+      ctx.arcTo(x, y + h, x, y, r);
+      ctx.arcTo(x, y, x + w, y, r);
+      ctx.closePath();
+    }
+
+    function fitText(ctx, text, maxWidth) {
+      let t = String(text);
+      while (t.length > 1 && ctx.measureText(t).width > maxWidth) t = t.slice(0, -2) + '…';
+      return t;
+    }
+
+    function drawStory(canvas, profile, pseudo) {
+      const W = canvas.width;
+      const H = canvas.height;
+      const ctx = canvas.getContext('2d');
+      const M = 80; // marge
+      const CW = W - 2 * M;
+
+      // Fond : dégradé de la charte + halos néon
+      const bg = ctx.createLinearGradient(0, 0, 0, H);
+      bg.addColorStop(0, '#0b0f19');
+      bg.addColorStop(1, '#151c2e');
+      ctx.fillStyle = bg;
+      ctx.fillRect(0, 0, W, H);
+      const halo1 = ctx.createRadialGradient(160, 200, 0, 160, 200, 900);
+      halo1.addColorStop(0, 'rgba(255,0,127,.32)');
+      halo1.addColorStop(1, 'rgba(255,0,127,0)');
+      ctx.fillStyle = halo1;
+      ctx.fillRect(0, 0, W, H);
+      const halo2 = ctx.createRadialGradient(920, 1750, 0, 920, 1750, 900);
+      halo2.addColorStop(0, 'rgba(0,240,255,.26)');
+      halo2.addColorStop(1, 'rgba(0,240,255,0)');
+      ctx.fillStyle = halo2;
+      ctx.fillRect(0, 0, W, H);
+
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+
+      // Titre
+      ctx.font = `900 96px ${FONT_DISPLAY}`;
+      const tg = ctx.createLinearGradient(M, 0, W - M, 0);
+      tg.addColorStop(0, '#ff007f');
+      tg.addColorStop(1, '#00f0ff');
+      ctx.fillStyle = tg;
+      ctx.fillText('MUSIC REFS', W / 2, 200);
+      ctx.font = `600 40px ${FONT}`;
+      ctx.fillStyle = '#94a3b8';
+      ctx.fillText('MON PROFIL DE CULTURE MUSICALE', W / 2, 280);
+
+      // Pseudo
+      let y = 400;
+      if (pseudo) {
+        ctx.font = `700 56px ${FONT}`;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(fitText(ctx, pseudo, CW), W / 2, y);
+        y += 90;
+      }
+
+      // Grade
+      ctx.font = `700 40px ${FONT}`;
+      ctx.fillStyle = '#94a3b8';
+      ctx.fillText('GRADE', W / 2, y);
+      y += 80;
+      ctx.font = `900 64px ${FONT_DISPLAY}`;
+      ctx.fillStyle = '#ff007f';
+      ctx.shadowColor = 'rgba(255,0,127,.6)';
+      ctx.shadowBlur = 30;
+      ctx.fillText(fitText(ctx, profile.mainGrade.title, CW), W / 2, y);
+      ctx.shadowBlur = 0;
+      y += 70;
+      ctx.font = `600 40px ${FONT}`;
+      ctx.fillStyle = '#e2e8f0';
+      ctx.fillText(`${profile.ratePct} % de réussite · ${profile.found} / ${profile.total}`, W / 2, y);
+      y += 110;
+
+      // Trois tuiles : série, légendaires, total
+      const tiles = [
+        { label: 'SÉRIE', value: profile.bestStreak, color: '#ff007f' },
+        { label: 'LÉGENDAIRES', value: profile.legendaryFound, color: '#c084fc' },
+        { label: 'JOUÉ', value: profile.total, color: '#00f0ff' },
+      ];
+      const gap = 24;
+      const tw = (CW - gap * 2) / 3;
+      const th = 220;
+      tiles.forEach((t, i) => {
+        const x = M + i * (tw + gap);
+        roundRect(ctx, x, y, tw, th, 32);
+        ctx.fillStyle = 'rgba(21,28,46,.9)';
+        ctx.fill();
+        ctx.strokeStyle = t.color;
+        ctx.lineWidth = 4;
+        ctx.stroke();
+        ctx.font = `700 40px ${FONT}`;
+        ctx.fillStyle = t.color;
+        ctx.fillText(t.label, x + tw / 2, y + 60);
+        ctx.font = `900 88px ${FONT_DISPLAY}`;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(String(t.value), x + tw / 2, y + 145);
+      });
+      y += th + 90;
+
+      // Barres par catégorie (max 8)
+      ctx.textAlign = 'left';
+      ctx.font = `700 44px ${FONT}`;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText('RÉUSSITE PAR CATÉGORIE', M, y);
+      y += 80;
+      const cats = profile.categories.slice(0, 8);
+      const barH = 44;
+      const rowH = 140;
+      cats.forEach((c) => {
+        ctx.textAlign = 'left';
+        ctx.font = `600 40px ${FONT}`;
+        ctx.fillStyle = '#e2e8f0';
+        ctx.fillText(fitText(ctx, c.name, CW - 200), M, y);
+        ctx.textAlign = 'right';
+        ctx.font = `700 40px ${FONT}`;
+        ctx.fillStyle = '#00f0ff';
+        ctx.fillText(`${c.ratePct} %`, W - M, y);
+        const by = y + 40;
+        roundRect(ctx, M, by, CW, barH, barH / 2);
+        ctx.fillStyle = 'rgba(255,255,255,.1)';
+        ctx.fill();
+        const fw = Math.max(barH, Math.round((CW * c.ratePct) / 100));
+        if (c.ratePct > 0) {
+          roundRect(ctx, M, by, fw, barH, barH / 2);
+          const g = ctx.createLinearGradient(M, 0, M + CW, 0);
+          g.addColorStop(0, '#ff007f');
+          g.addColorStop(1, '#00f0ff');
+          ctx.fillStyle = g;
+          ctx.fill();
+        }
+        y += rowH;
+      });
+      if (!cats.length) {
+        ctx.textAlign = 'left';
+        ctx.font = `600 40px ${FONT}`;
+        ctx.fillStyle = '#94a3b8';
+        ctx.fillText('Aucune catégorie jouée pour le moment', M, y);
+      }
+
+      // Pied : URL du site
+      ctx.textAlign = 'center';
+      ctx.font = `700 44px ${FONT}`;
+      ctx.fillStyle = '#00f0ff';
+      ctx.fillText(SITE_URL, W / 2, H - 120);
+      ctx.font = `600 40px ${FONT}`;
+      ctx.fillStyle = '#94a3b8';
+      ctx.fillText('Le jeu des punchlines & citations', W / 2, H - 60);
+      return canvas;
+    }
+
+    function toBlob(canvas) {
+      return new Promise((resolve, reject) => {
+        try {
+          canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Image vide'))), 'image/png');
+        } catch (e) { reject(e); }
+      });
+    }
+
+    function downloadBlob(blob, filename) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.rel = 'noopener';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    }
+
+    async function shareOrDownload(blob, filename) {
+      const file = new File([blob], filename, { type: 'image/png' });
+      let coarse = false;
+      try { coarse = window.matchMedia('(pointer: coarse)').matches; } catch (_) { /* ignore */ }
+      const canShareFile = coarse && typeof navigator.canShare === 'function'
+        && typeof navigator.share === 'function' && navigator.canShare({ files: [file] });
+      if (canShareFile) {
+        try {
+          await navigator.share({ files: [file], title: 'Mon profil Music Refs' });
+          return 'share';
+        } catch (e) {
+          if (e && e.name === 'AbortError') return 'cancel';
+          // sinon : repli sur le téléchargement
+        }
+      }
+      downloadBlob(blob, filename);
+      return 'download';
+    }
+
+    let currentProfile = null;
+    let currentPseudo = '';
+
+    async function onDownload() {
+      if (!currentProfile) return;
+      const btn = $('btn-download');
+      const status = $('dl-status');
+      btn.disabled = true;
+      status.classList.remove('hidden');
+      status.textContent = 'Génération de l\'image…';
+      try {
+        try { await document.fonts?.ready; } catch (_) { /* police système en repli */ }
+        const canvas = drawStory($('story'), currentProfile, currentPseudo);
+        const blob = await toBlob(canvas);
+        const res = await shareOrDownload(blob, 'music-refs-profil.png');
+        status.textContent = res === 'share' ? 'Image partagée !' : res === 'cancel' ? 'Partage annulé.' : 'Image téléchargée (1080×1920).';
+      } catch (e) {
+        status.textContent = 'Impossible de générer l\'image : ' + (e.message || 'erreur');
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    async function init() {
+      const history = loadHistory();
+      const names = await fetchCategoryNames('');
+      const profile = computeProfile(history, { names, bestStreak: getBestStreak() });
+      let pseudo = '';
+      try { pseudo = getPlayer().pseudo || ''; } catch (_) { /* ignore */ }
+      currentProfile = profile;
+      currentPseudo = pseudo;
+      if (!profile.ready) renderLocked(profile);
+      else renderProfile(profile, pseudo);
+    }
+
+    $('btn-download').addEventListener('click', onDownload);
+    init().catch((e) => { $('toast').textContent = e.message || 'Erreur'; });
+  </script>
+</body>
+</html>

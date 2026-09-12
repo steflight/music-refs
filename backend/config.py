@@ -11,6 +11,12 @@ class Settings(BaseSettings):
     user_agent: str = "MusicRefs/1.0 (music-refs-dev.kladriva.ca; contact@kladriva.ca)"
     cors_origins: str = "*"
     rate_limit_per_minute: int = 120
+    # MR-08 / MR-14 — Web Push (VAPID). Clés absentes = push désactivé (le service démarre quand même).
+    vapid_public_key: str = ""
+    vapid_private_key: str = ""
+    vapid_subject: str = "mailto:contact@kladriva.ca"
+    push_reminder_hour: int = 19
+    push_scheduler_enabled: bool = True
 
 
 @lru_cache

@@ -64,6 +64,7 @@
       </div>
       <div class="flex items-center gap-2 shrink-0">
         <button type="button" data-sfx-toggle class="tap w-11 rounded-xl border border-white/15 bg-black/40" title="Son">🔊</button>
+        <a href="/profil" class="tap w-11 inline-flex items-center justify-center rounded-xl border border-white/15 text-base" title="Mon profil" aria-label="Mon profil">👤</a>
         <a href="/" class="tap inline-flex items-center px-3 rounded-xl border border-white/15 text-sm">Infini</a>
         <a href="/party.html" class="tap inline-flex items-center px-3 rounded-xl border border-neonPink/40 text-neonPink text-sm font-semibold">Amis</a>
       </div>
@@ -137,7 +138,10 @@
 
       <div id="reveals-box" class="space-y-2 border-t border-white/10 pt-4">
         <h3 class="font-semibold text-sm text-white">Réponses du jour</h3>
+        <p class="text-[11px] text-slate-500">🔥 j'adore · 👎 bof — un seul vote par citation, modifiable.</p>
         <div id="reveals-list" class="space-y-2"></div>
+        <p id="reveals-error" aria-live="polite" class="hidden text-xs text-amber-300"></p>
+        <a href="/proposer" class="tap inline-flex items-center justify-center w-full rounded-xl border border-amber-400/40 text-amber-300 text-sm font-semibold">🎤 Proposer une punchline</a>
       </div>
 
       <div id="pseudo-box" class="hidden space-y-2 border-t border-white/10 pt-4">
@@ -157,6 +161,21 @@
 
       <p id="countdown" class="text-center text-neonPink font-display text-sm"></p>
       <a href="/?mode=infinite" class="tap inline-flex justify-center w-full rounded-xl border border-white/15 text-sm py-3">Continuer à jouer (infini)</a>
+      <p class="text-center text-xs"><a href="/profil" class="text-slate-400 hover:text-neonCyan underline underline-offset-2 py-3 inline-block">Mon profil de culture musicale</a></p>
+    </section>
+
+    <!-- MR-08 : rappel quotidien (Web Push) — proposé seulement après la 2e partie terminée, jamais à la 1re visite -->
+    <section id="push-box" class="hidden panel rounded-2xl border border-amber-400/30 p-4 space-y-3">
+      <div id="push-optin" class="space-y-2">
+        <p class="font-semibold text-white">🔔 Reçois un rappel à 19 h si tu n'as pas joué</p>
+        <p class="text-xs text-slate-400">Une seule notification par jour, uniquement si ta série est en jeu. Désactivable à tout moment.</p>
+        <button type="button" id="btn-push-on" class="tap w-full rounded-xl bg-amber-400/20 border border-amber-400/50 text-amber-200 font-semibold">Activer</button>
+      </div>
+      <div id="push-setting" class="hidden flex items-center justify-between gap-3">
+        <p class="text-sm text-slate-200">🔔 <span id="push-label">Rappel quotidien : désactivé</span></p>
+        <button type="button" id="btn-push-toggle" class="tap px-4 rounded-xl border border-white/15 text-sm shrink-0">Activer</button>
+      </div>
+      <p id="push-msg" aria-live="polite" class="text-xs text-amber-300 empty:hidden"></p>
     </section>
 
     <div id="milestone" class="hidden fixed inset-0 z-50 bg-black/85 flex items-center justify-center p-6">
@@ -171,12 +190,17 @@
   <script type="module">
     import { bindSfxToggle, playSuccess, playError, playPartial, playStreak, unlockSfx } from './src/services/sfx.js';
     import { track } from './src/services/analytics.js';
+    import { record as recordProfile } from './src/services/profileStore.js'; // MR-15
     import {
       getPlayer, setPseudo, getStreak, recordDailyCompletion, applyStreakFreeze,
       loadDailyState, saveDailyState, buildShareBlock, cellEmoji, prefersReducedMotion,
       isStreakInDanger, hasStartedToday, secondsToNextToronto, formatCountdown,
       validatePseudo, consumeShareRef, gridToCells, apiErrorMessage,
     } from './src/services/dailyStore.js';
+    import {
+      countCompletedDailies, pushOptinEligible, getPushPref, setPushPref,
+      urlBase64ToUint8Array, pushSupported, pushSettingLabel,
+    } from './src/services/dailyStore.js'; // MR-08
 
     bindSfxToggle();
 
@@ -491,6 +515,19 @@
       // Score autoritaire : delta net renvoyé par le serveur (indices déjà déduits).
       const delta = Number(res.score_delta ?? 0);
       const already = !!res.already_answered;
+      // MR-15 : profil local — un résultat par citation (passée = 'skipped').
+      if (!already) {
+        try {
+          recordProfile({
+            quoteId: q.id,
+            categoryIds: q.category_ids || [],
+            rarity,
+            outcome: skip ? 'skipped' : (full ? (state.hintsThis > 0 ? 'hint' : 'correct') : 'wrong'),
+            mode: 'daily',
+            day: state.pack.date,
+          });
+        } catch (_) { /* profil non bloquant */ }
+      }
 
       if (skip && !already) {
         flashCard('ko');
@@ -577,9 +614,66 @@
         .replace(/"/g, '&quot;');
     }
 
+    /** MR-17 — classes des boutons 🔥 / 👎 selon le vote courant (1, -1 ou null). */
+    function voteButtonClass(kind, myVote) {
+      const base = 'tap min-w-[44px] px-3 rounded-xl border text-sm font-semibold transition-colors';
+      const selected = kind === 'up' ? myVote === 1 : myVote === -1;
+      if (selected) {
+        return `${base} ${kind === 'up' ? 'bg-neonPink/25 border-neonPink text-neonPink' : 'bg-amber-500/20 border-amber-400 text-amber-300'}`;
+      }
+      return `${base} border-white/15 text-slate-300 hover:bg-white/5`;
+    }
+
+    function paintVoteButtons(card, myVote) {
+      const up = card.querySelector('[data-vote="1"]');
+      const down = card.querySelector('[data-vote="-1"]');
+      if (!up || !down) return;
+      up.className = voteButtonClass('up', myVote);
+      down.className = voteButtonClass('down', myVote);
+      up.setAttribute('aria-pressed', myVote === 1 ? 'true' : 'false');
+      down.setAttribute('aria-pressed', myVote === -1 ? 'true' : 'false');
+    }
+
+    function showRevealsError(msg) {
+      const el = $('reveals-error');
+      if (!el) return;
+      el.textContent = msg || '';
+      el.classList.toggle('hidden', !msg);
+    }
+
+    /** MR-17 — vote optimiste : l'état bascule tout de suite, puis rollback + message discret si le serveur refuse. */
+    async function voteReveal(card, reveal, value) {
+      if (card.dataset.voting === '1') return;
+      const previous = reveal.my_vote ?? null;
+      if (previous === value) return; // déjà ce vote : rien à faire (un seul vote par citation)
+      card.dataset.voting = '1';
+      reveal.my_vote = value;
+      paintVoteButtons(card, value);
+      showRevealsError('');
+      try {
+        const r = await fetch(`/api/music-refs/quotes/${reveal.id}/vote`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ player_id: getPlayer().id, value }),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(apiErrorMessage(data, 'Vote non enregistré'));
+        reveal.my_vote = typeof data.my_vote === 'number' ? data.my_vote : value;
+        paintVoteButtons(card, reveal.my_vote);
+        saveDailyState(state.pack.date, state.pack.category_key, completedSnapshot());
+      } catch (err) {
+        reveal.my_vote = previous;
+        paintVoteButtons(card, previous);
+        showRevealsError(err?.message || 'Vote non enregistré — réessaie plus tard.');
+      } finally {
+        delete card.dataset.voting;
+      }
+    }
+
     function renderReveals(reveals) {
       const box = $('reveals-list');
       box.innerHTML = '';
+      showRevealsError('');
       (reveals || []).forEach((r, i) => {
         const ans = state.answers[i];
         const ok = ans?.full;
@@ -588,12 +682,26 @@
         const listen = r.listen_url
           ? `<a href="${escapeHtml(r.listen_url)}" target="_blank" rel="noopener" class="text-xs text-neonCyan underline">Écouter</a>`
           : '';
+        const contributor = r.contributor_pseudo
+          ? `<p class="text-[11px] text-amber-300">Proposée par ${escapeHtml(r.contributor_pseudo)}</p>`
+          : '';
+        const myVote = typeof r.my_vote === 'number' ? r.my_vote : null;
         div.innerHTML = `
           <p class="text-[10px] uppercase text-slate-500">#${i + 1} · ${escapeHtml(rarityLabel(r.rarity))} ${ok ? '✅' : '❌'}</p>
           <p class="text-xs text-slate-400 italic line-clamp-2">« ${escapeHtml(r.quote)} »</p>
           <p class="text-sm"><strong class="text-neonCyan">${escapeHtml(r.artist)}</strong> — ${escapeHtml(r.title)}</p>
-          ${listen}
+          ${contributor}
+          <div class="flex items-center justify-between gap-2 pt-1">
+            <span>${listen}</span>
+            <div class="flex gap-2" role="group" aria-label="Noter cette citation">
+              <button type="button" data-vote="1" class="${voteButtonClass('up', myVote)}" aria-pressed="${myVote === 1}" aria-label="J'adore">🔥</button>
+              <button type="button" data-vote="-1" class="${voteButtonClass('down', myVote)}" aria-pressed="${myVote === -1}" aria-label="Bof">👎</button>
+            </div>
+          </div>
         `;
+        div.querySelectorAll('[data-vote]').forEach((btn) => {
+          btn.addEventListener('click', () => voteReveal(div, r, Number(btn.dataset.vote)));
+        });
         box.appendChild(div);
       });
     }
@@ -668,6 +776,7 @@
         date: state.pack.date,
         category_key: state.pack.category_key,
         category_id: state.pack.category_id,
+        challenge_code: state.challenge?.code || null, // MR-14
       };
     }
 
@@ -945,9 +1054,137 @@
       });
     });
 
-    // PWA light (MR-08 partiel — pas de push VAPID)
+    // ---- MR-08 : PWA + rappel quotidien Web Push (VAPID) ----------------------
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('/sw.js').catch(() => {});
+    }
+
+    const pushUi = { reg: null, key: null };
+    const pushMsg = (t) => { const el = $('push-msg'); if (el) el.textContent = t || ''; };
+    const tzName = () => {
+      try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Toronto'; } catch (_) { return 'America/Toronto'; }
+    };
+    async function pushPublicKey() {
+      if (pushUi.key !== null) return pushUi.key;
+      try {
+        const d = await fetch('/api/music-refs/push/public-key').then((r) => r.json());
+        pushUi.key = d && d.enabled ? String(d.public_key || '') : '';
+      } catch (_) { pushUi.key = ''; }
+      return pushUi.key;
+    }
+    async function pushRegistration() {
+      if (pushUi.reg) return pushUi.reg;
+      try { pushUi.reg = await navigator.serviceWorker.ready; } catch (_) { pushUi.reg = null; }
+      return pushUi.reg;
+    }
+    async function currentPushSub() {
+      const reg = await pushRegistration();
+      if (!reg || !reg.pushManager) return null;
+      try { return await reg.pushManager.getSubscription(); } catch (_) { return null; }
+    }
+    async function postPushSubscription(sub) {
+      const r = await fetch('/api/music-refs/push/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          player_id: getPlayer().id,
+          subscription: sub.toJSON(),
+          tz: tzName(),
+          streak: getStreak().currentStreak || 0,
+        }),
+      });
+      if (!r.ok) throw new Error(apiErrorMessage(await r.json().catch(() => ({})), 'Abonnement refusé'));
+    }
+    function showPushOptin() {
+      $('push-box').classList.remove('hidden');
+      $('push-optin').classList.remove('hidden');
+      $('push-setting').classList.add('hidden');
+    }
+    function showPushSetting(enabled) {
+      $('push-box').classList.remove('hidden');
+      $('push-optin').classList.add('hidden');
+      $('push-setting').classList.remove('hidden');
+      $('push-label').textContent = pushSettingLabel(enabled);
+      $('btn-push-toggle').textContent = enabled ? 'Désactiver' : 'Activer';
+      $('btn-push-toggle').dataset.enabled = enabled ? '1' : '0';
+    }
+    /** Décide quoi afficher : rien si non supporté (iOS Safari non installé), réglage si déjà
+     *  demandé, invitation seulement sur l'écran de fin après ≥ 2 parties terminées. */
+    async function refreshPushBox() {
+      const box = $('push-box');
+      if (!box) return;
+      if (!pushSupported()) { box.classList.add('hidden'); return; }
+      const pref = getPushPref();
+      const sub = await currentPushSub();
+      const active = !!sub && pref.enabled && Notification.permission === 'granted';
+      const endVisible = !$('end').classList.contains('hidden');
+      if (active) {
+        showPushSetting(true);
+        if (endVisible) postPushSubscription(sub).catch(() => {}); // resynchronise fuseau + série
+        return;
+      }
+      if (pref.everAsked) { showPushSetting(false); return; }
+      if (endVisible && pushOptinEligible(countCompletedDailies())) { showPushOptin(); return; }
+      box.classList.add('hidden');
+    }
+    async function enablePush() {
+      pushMsg('');
+      const btn = $('btn-push-on');
+      btn.disabled = true;
+      try {
+        const key = await pushPublicKey();
+        if (!key) { pushMsg('Rappels indisponibles pour le moment.'); return; }
+        let perm = Notification.permission;
+        if (perm !== 'granted') perm = await Notification.requestPermission();
+        setPushPref({ everAsked: true });
+        if (perm !== 'granted') {
+          showPushSetting(false);
+          pushMsg(perm === 'denied' ? 'Notifications bloquées dans les réglages du navigateur.' : 'Rappel non activé.');
+          return;
+        }
+        const reg = await pushRegistration();
+        if (!reg || !reg.pushManager) { pushMsg('Service indisponible sur ce navigateur.'); return; }
+        let sub = await reg.pushManager.getSubscription();
+        if (!sub) {
+          sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(key) });
+        }
+        await postPushSubscription(sub);
+        setPushPref({ enabled: true, endpoint: sub.endpoint, tz: tzName(), everAsked: true });
+        track('notif_optin', { tz: tzName() });
+        showPushSetting(true);
+        pushMsg('Rappel activé : notification à 19 h si tu n’as pas encore joué.');
+      } catch (e) {
+        pushMsg(e && e.message ? e.message : 'Activation impossible.');
+      } finally {
+        btn.disabled = false;
+      }
+    }
+    async function disablePush() {
+      pushMsg('');
+      const sub = await currentPushSub();
+      if (sub) {
+        try {
+          await fetch('/api/music-refs/push/subscribe', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ endpoint: sub.endpoint }),
+          });
+        } catch (_) { /* le serveur nettoiera à la prochaine erreur d'envoi */ }
+        try { await sub.unsubscribe(); } catch (_) { /* ignore */ }
+      }
+      setPushPref({ enabled: false, endpoint: null, everAsked: true });
+      showPushSetting(false);
+      pushMsg('Rappel désactivé.');
+    }
+    if ($('push-box')) {
+      $('btn-push-on').addEventListener('click', enablePush);
+      $('btn-push-toggle').addEventListener('click', () => {
+        if ($('btn-push-toggle').dataset.enabled === '1') disablePush(); else enablePush();
+      });
+      // L'écran de fin apparaît via sa classe `hidden` : on réévalue le bloc à chaque changement.
+      new MutationObserver(() => { refreshPushBox().catch(() => {}); })
+        .observe($('end'), { attributes: true, attributeFilter: ['class'] });
+      refreshPushBox().catch(() => {});
     }
 
     await loadCategories();

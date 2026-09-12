@@ -363,3 +363,76 @@ export function apiErrorMessage(data, fallback = 'Erreur serveur') {
   }
   return fallback;
 }
+
+/* ------------------------------------------------------------------ */
+/* MR-08 — Rappel quotidien (Web Push) : helpers purs                  */
+/* ------------------------------------------------------------------ */
+
+export const PUSH_PREF_KEY = 'mr:push';
+/** La demande d'activation n'apparaît qu'après la 2e partie terminée. */
+export const PUSH_MIN_COMPLETED = 2;
+
+function defaultStorage() {
+  return typeof localStorage !== 'undefined' ? localStorage : null;
+}
+
+/** Nombre de sets quotidiens terminés (snapshots `mr:daily:*` avec `completed: true`). */
+export function countCompletedDailies(storage = defaultStorage()) {
+  if (!storage) return 0;
+  let n = 0;
+  try {
+    for (let i = 0; i < storage.length; i += 1) {
+      const k = storage.key(i);
+      if (!k || !k.startsWith('mr:daily:')) continue;
+      let v = null;
+      try { v = JSON.parse(storage.getItem(k) || 'null'); } catch (_) { v = null; }
+      if (v && typeof v === 'object' && v.completed) n += 1;
+    }
+  } catch (_) { /* ignore */ }
+  return n;
+}
+
+/** Peut-on proposer l'activation ? Jamais à la 1re visite : ≥ 2 parties terminées. */
+export function pushOptinEligible(completedCount) {
+  return Number(completedCount) >= PUSH_MIN_COMPLETED;
+}
+
+/** Réglage persistant « Rappel quotidien » : { enabled, endpoint, tz, everAsked }. */
+export function getPushPref(storage = defaultStorage()) {
+  const base = { enabled: false, endpoint: null, tz: null, everAsked: false };
+  if (!storage) return base;
+  try {
+    const raw = JSON.parse(storage.getItem(PUSH_PREF_KEY) || 'null');
+    return raw && typeof raw === 'object' ? { ...base, ...raw } : base;
+  } catch (_) {
+    return base;
+  }
+}
+
+export function setPushPref(patch, storage = defaultStorage()) {
+  const next = { ...getPushPref(storage), ...(patch || {}) };
+  try { storage?.setItem(PUSH_PREF_KEY, JSON.stringify(next)); } catch (_) { /* ignore */ }
+  return next;
+}
+
+/** Clé publique VAPID (base64url) → Uint8Array pour `pushManager.subscribe`. */
+export function urlBase64ToUint8Array(base64String) {
+  const s = String(base64String || '').trim();
+  const padding = '='.repeat((4 - (s.length % 4)) % 4);
+  const b64 = (s + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = typeof atob === 'function' ? atob(b64) : Buffer.from(b64, 'base64').toString('binary');
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i += 1) out[i] = raw.charCodeAt(i);
+  return out;
+}
+
+/** Web Push disponible ? (faux sur iOS Safari non installé : pas de PushManager). */
+export function pushSupported(win = typeof window !== 'undefined' ? window : null, nav = typeof navigator !== 'undefined' ? navigator : null) {
+  if (!win || !nav) return false;
+  return 'Notification' in win && 'PushManager' in win && 'serviceWorker' in nav && win.isSecureContext !== false;
+}
+
+/** Texte du réglage : « Rappel quotidien : activé/désactivé ». */
+export function pushSettingLabel(enabled) {
+  return `Rappel quotidien : ${enabled ? 'activé' : 'désactivé'}`;
+}

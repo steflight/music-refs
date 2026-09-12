@@ -263,6 +263,95 @@ def init_db() -> None:
         result_cols = {r[1] for r in conn.execute("PRAGMA table_info(daily_results)").fetchall()}
         if "played" not in result_cols:
             conn.execute("ALTER TABLE daily_results ADD COLUMN played INTEGER NOT NULL DEFAULT 0")
+        # MR-08 — abonnements Web Push (un par endpoint ; tz = fuseau IANA du joueur)
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS push_subscriptions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                player_id TEXT NOT NULL,
+                endpoint TEXT NOT NULL UNIQUE,
+                p256dh TEXT NOT NULL,
+                auth TEXT NOT NULL,
+                tz TEXT NOT NULL DEFAULT 'America/Toronto',
+                created_at TEXT DEFAULT (datetime('now')),
+                last_sent_day TEXT,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                streak INTEGER
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_push_player ON push_subscriptions(player_id)")
+        push_cols = {r[1] for r in conn.execute("PRAGMA table_info(push_subscriptions)").fetchall()}
+        if "streak" not in push_cols:
+            conn.execute("ALTER TABLE push_subscriptions ADD COLUMN streak INTEGER")
+        # MR-14 — un seul envoi de notification par défi
+        ch_cols = {r[1] for r in conn.execute("PRAGMA table_info(daily_challenges)").fetchall()}
+        if "notified_at" not in ch_cols:
+            conn.execute("ALTER TABLE daily_challenges ADD COLUMN notified_at TEXT")
+        # MR-16 — contenu communautaire : propositions de punchlines (relues en admin)
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS submissions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                quote TEXT NOT NULL,
+                artist TEXT NOT NULL,
+                title TEXT NOT NULL,
+                category_id INTEGER,
+                year TEXT DEFAULT '',
+                listen_url TEXT DEFAULT '',
+                player_id TEXT NOT NULL,
+                pseudo TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'pending',
+                reason TEXT DEFAULT '',
+                quote_id INTEGER,
+                quote_norm TEXT NOT NULL DEFAULT '',
+                artist_norm TEXT NOT NULL DEFAULT '',
+                created_day TEXT NOT NULL,
+                created_at TEXT DEFAULT (datetime('now')),
+                reviewed_at TEXT,
+                FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE SET NULL
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_submissions_status ON submissions(status, id)")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_submissions_player_day ON submissions(player_id, created_day)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_submissions_norm ON submissions(artist_norm, quote_norm)"
+        )
+        # MR-16 — citation issue d'une proposition : pseudo du contributeur + lien vers la proposition
+        quote_cols = {r[1] for r in conn.execute("PRAGMA table_info(quotes)").fetchall()}
+        if "contributor_pseudo" not in quote_cols:
+            conn.execute("ALTER TABLE quotes ADD COLUMN contributor_pseudo TEXT DEFAULT ''")
+        if "submission_id" not in quote_cols:
+            conn.execute("ALTER TABLE quotes ADD COLUMN submission_id INTEGER")
+        # MR-17 — vote 🔥 / 👎 : un seul vote par joueur et par citation (revotable)
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS quote_votes (
+                quote_id INTEGER NOT NULL,
+                player_id TEXT NOT NULL,
+                value INTEGER NOT NULL CHECK (value IN (1, -1)),
+                created_at TEXT DEFAULT (datetime('now')),
+                updated_at TEXT DEFAULT (datetime('now')),
+                PRIMARY KEY (quote_id, player_id),
+                FOREIGN KEY (quote_id) REFERENCES quotes(id) ON DELETE CASCADE
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_quote_votes_quote ON quote_votes(quote_id, value)")
+        # MR-16 — récompenses (points + badges) créditées au contributeur à l'approbation
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS player_rewards (
+                player_id TEXT PRIMARY KEY,
+                points INTEGER NOT NULL DEFAULT 0,
+                badges_json TEXT NOT NULL DEFAULT '[]',
+                updated_at TEXT DEFAULT (datetime('now'))
+            )
+            """
+        )
         _seed_categories(conn)
 
 
@@ -342,6 +431,7 @@ def row_to_quote(row: sqlite3.Row, category_ids: list[int] | None = None) -> dic
         "title": row["title"],
         "listen_url": str(_row_get(row, "listen_url", "") or ""),
         "rarity": rarity,
+        "contributor_pseudo": str(_row_get(row, "contributor_pseudo", "") or ""),
         "hints": {
             "year": row["year"] or "",
             "genre": row["genre"] or "",
@@ -975,6 +1065,7 @@ def quote_reveal_view(q: dict[str, Any]) -> dict[str, Any]:
         "title": q["title"],
         "listen_url": q.get("listen_url") or "",
         "rarity": rarity,
+        "contributor_pseudo": q.get("contributor_pseudo") or "",
     }
 
 
@@ -1426,3 +1517,402 @@ def compute_stats(conn: sqlite3.Connection, days: int = 30, today: "date | None"
         "totals": totals,
         "by_day": by_day,
     }
+
+
+# ---------------------------------------------------------------------------
+# MR-16 / MR-17 — contenu communautaire : propositions, votes, récompenses
+# ---------------------------------------------------------------------------
+
+SUBMISSION_STATUSES = ("pending", "approved", "rejected")
+CONTRIBUTOR_POINTS = 50
+CONTRIBUTOR_BADGE = "contributeur"
+FLAG_MIN_VOTES = 30
+FLAG_DOWN_RATIO = 0.40
+
+
+def _submission_row(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "quote": row["quote"],
+        "artist": row["artist"],
+        "title": row["title"],
+        "category_id": row["category_id"],
+        "year": row["year"] or "",
+        "listen_url": row["listen_url"] or "",
+        "player_id": row["player_id"],
+        "pseudo": row["pseudo"] or "",
+        "status": row["status"],
+        "reason": row["reason"] or "",
+        "quote_id": row["quote_id"],
+        "created_at": row["created_at"] or "",
+        "reviewed_at": row["reviewed_at"],
+    }
+
+
+def count_submissions_for_day(conn: sqlite3.Connection, player_id: str, day_iso: str) -> int:
+    row = conn.execute(
+        "SELECT COUNT(*) AS n FROM submissions WHERE player_id = ? AND created_day = ?",
+        (player_id, day_iso),
+    ).fetchone()
+    return int(row["n"]) if row else 0
+
+
+def find_duplicate_submission(
+    conn: sqlite3.Connection, artist_norm: str, quote_norm: str
+) -> dict[str, Any] | None:
+    """Proposition non rejetée ayant le même artiste et le même texte normalisés."""
+    row = conn.execute(
+        """
+        SELECT * FROM submissions
+        WHERE artist_norm = ? AND quote_norm = ? AND status != 'rejected'
+        ORDER BY id LIMIT 1
+        """,
+        (artist_norm, quote_norm),
+    ).fetchone()
+    return _submission_row(row) if row else None
+
+
+def iter_quote_identities(conn: sqlite3.Connection) -> list[tuple[int, str, str]]:
+    """(id, artist, quote) de tout le catalogue — pour la déduplication normalisée."""
+    return [
+        (int(r["id"]), r["artist"], r["quote"])
+        for r in conn.execute("SELECT id, artist, quote FROM quotes").fetchall()
+    ]
+
+
+def insert_submission(
+    conn: sqlite3.Connection,
+    *,
+    quote: str,
+    artist: str,
+    title: str,
+    category_id: int | None,
+    year: str,
+    listen_url: str,
+    player_id: str,
+    pseudo: str,
+    quote_norm: str,
+    artist_norm: str,
+    created_day: str,
+) -> dict[str, Any]:
+    cur = conn.execute(
+        """
+        INSERT INTO submissions
+            (quote, artist, title, category_id, year, listen_url, player_id, pseudo,
+             status, quote_norm, artist_norm, created_day)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
+        """,
+        (
+            quote.strip(),
+            artist.strip(),
+            title.strip(),
+            category_id,
+            (year or "").strip(),
+            (listen_url or "").strip()[:500],
+            player_id,
+            pseudo,
+            quote_norm,
+            artist_norm,
+            created_day,
+        ),
+    )
+    return get_submission(conn, int(cur.lastrowid))  # type: ignore[return-value]
+
+
+def get_submission(conn: sqlite3.Connection, submission_id: int) -> dict[str, Any] | None:
+    row = conn.execute("SELECT * FROM submissions WHERE id = ?", (submission_id,)).fetchone()
+    return _submission_row(row) if row else None
+
+
+def list_submissions(conn: sqlite3.Connection, status: str | None = "pending", limit: int = 200) -> list[dict]:
+    if status and status != "all":
+        rows = conn.execute(
+            "SELECT * FROM submissions WHERE status = ? ORDER BY id DESC LIMIT ?", (status, limit)
+        ).fetchall()
+    else:
+        rows = conn.execute("SELECT * FROM submissions ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+    return [_submission_row(r) for r in rows]
+
+
+def count_submissions_by_status(conn: sqlite3.Connection) -> dict[str, int]:
+    out = {s: 0 for s in SUBMISSION_STATUSES}
+    for r in conn.execute("SELECT status, COUNT(*) AS n FROM submissions GROUP BY status").fetchall():
+        out[str(r["status"])] = int(r["n"])
+    return out
+
+
+def set_submission_status(
+    conn: sqlite3.Connection,
+    submission_id: int,
+    *,
+    status: str,
+    reason: str = "",
+    quote_id: int | None = None,
+) -> dict[str, Any] | None:
+    conn.execute(
+        """
+        UPDATE submissions
+        SET status = ?, reason = ?, quote_id = COALESCE(?, quote_id), reviewed_at = datetime('now')
+        WHERE id = ?
+        """,
+        (status, (reason or "")[:500], quote_id, submission_id),
+    )
+    return get_submission(conn, submission_id)
+
+
+def set_quote_contributor(
+    conn: sqlite3.Connection, quote_id: int, *, contributor_pseudo: str, submission_id: int
+) -> None:
+    conn.execute(
+        "UPDATE quotes SET contributor_pseudo = ?, submission_id = ? WHERE id = ?",
+        (contributor_pseudo, submission_id, quote_id),
+    )
+
+
+def get_player_rewards(conn: sqlite3.Connection, player_id: str) -> dict[str, Any]:
+    row = conn.execute("SELECT * FROM player_rewards WHERE player_id = ?", (player_id,)).fetchone()
+    if not row:
+        return {"player_id": player_id, "points": 0, "badges": []}
+    try:
+        badges = json.loads(row["badges_json"] or "[]")
+    except (TypeError, ValueError):
+        badges = []
+    return {
+        "player_id": player_id,
+        "points": int(row["points"] or 0),
+        "badges": [str(b) for b in badges] if isinstance(badges, list) else [],
+    }
+
+
+def credit_player_reward(
+    conn: sqlite3.Connection, player_id: str, *, points: int = 0, badge: str | None = None
+) -> dict[str, Any]:
+    """Ajoute des points et (au plus une fois) un badge ; renvoie l'état à jour."""
+    current = get_player_rewards(conn, player_id)
+    badges = list(current["badges"])
+    if badge and badge not in badges:
+        badges.append(badge)
+    conn.execute(
+        """
+        INSERT INTO player_rewards (player_id, points, badges_json, updated_at)
+        VALUES (?, ?, ?, datetime('now'))
+        ON CONFLICT(player_id) DO UPDATE SET
+            points = excluded.points,
+            badges_json = excluded.badges_json,
+            updated_at = excluded.updated_at
+        """,
+        (player_id, current["points"] + int(points), json.dumps(badges, ensure_ascii=False)),
+    )
+    return get_player_rewards(conn, player_id)
+
+
+def player_has_played_quote(conn: sqlite3.Connection, player_id: str, quote_id: int) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM daily_answers WHERE player_id = ? AND quote_id = ? LIMIT 1",
+        (player_id, int(quote_id)),
+    ).fetchone()
+    return row is not None
+
+
+def upsert_quote_vote(conn: sqlite3.Connection, quote_id: int, player_id: str, value: int) -> None:
+    conn.execute(
+        """
+        INSERT INTO quote_votes (quote_id, player_id, value)
+        VALUES (?, ?, ?)
+        ON CONFLICT(quote_id, player_id) DO UPDATE SET
+            value = excluded.value,
+            updated_at = datetime('now')
+        """,
+        (int(quote_id), player_id, 1 if int(value) > 0 else -1),
+    )
+
+
+def get_player_vote(conn: sqlite3.Connection, quote_id: int, player_id: str | None) -> int | None:
+    if not player_id:
+        return None
+    row = conn.execute(
+        "SELECT value FROM quote_votes WHERE quote_id = ? AND player_id = ?", (int(quote_id), player_id)
+    ).fetchone()
+    return int(row["value"]) if row else None
+
+
+def quote_vote_counts(conn: sqlite3.Connection, quote_id: int) -> dict[str, int]:
+    row = conn.execute(
+        """
+        SELECT
+            COALESCE(SUM(CASE WHEN value = 1 THEN 1 ELSE 0 END), 0) AS up,
+            COALESCE(SUM(CASE WHEN value = -1 THEN 1 ELSE 0 END), 0) AS down
+        FROM quote_votes WHERE quote_id = ?
+        """,
+        (int(quote_id),),
+    ).fetchone()
+    up, down = int(row["up"]), int(row["down"])
+    return {"up": up, "down": down, "total": up + down}
+
+
+def list_flagged_quotes(
+    conn: sqlite3.Connection, min_votes: int = FLAG_MIN_VOTES, down_ratio: float = FLAG_DOWN_RATIO
+) -> list[dict[str, Any]]:
+    """Citations avec ≥ `min_votes` votes et une part de 👎 strictement > `down_ratio` (MR-17)."""
+    rows = conn.execute(
+        """
+        SELECT q.id, q.quote, q.artist, q.title, q.rarity, q.contributor_pseudo,
+               SUM(CASE WHEN v.value = 1 THEN 1 ELSE 0 END) AS up,
+               SUM(CASE WHEN v.value = -1 THEN 1 ELSE 0 END) AS down,
+               COUNT(*) AS total
+        FROM quote_votes v JOIN quotes q ON q.id = v.quote_id
+        GROUP BY q.id
+        HAVING total >= ? AND (down * 1.0 / total) > ?
+        ORDER BY (down * 1.0 / total) DESC, total DESC
+        """,
+        (int(min_votes), float(down_ratio)),
+    ).fetchall()
+    out = []
+    for r in rows:
+        total = int(r["total"])
+        down = int(r["down"])
+        out.append(
+            {
+                "id": int(r["id"]),
+                "quote": r["quote"],
+                "artist": r["artist"],
+                "title": r["title"],
+                "rarity": r["rarity"] or "commune",
+                "contributor_pseudo": r["contributor_pseudo"] or "",
+                "up": int(r["up"]),
+                "down": down,
+                "total": total,
+                "down_ratio": round(down / total, 3) if total else 0.0,
+            }
+        )
+    return out
+
+
+# --- MR-08 / MR-14 : abonnements Web Push ----------------------------------
+
+
+def _push_row(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": int(row["id"]),
+        "player_id": row["player_id"],
+        "endpoint": row["endpoint"],
+        "p256dh": row["p256dh"],
+        "auth": row["auth"],
+        "tz": row["tz"] or "America/Toronto",
+        "created_at": row["created_at"],
+        "last_sent_day": row["last_sent_day"],
+        "enabled": bool(row["enabled"]),
+        "streak": None if _row_get(row, "streak", None) is None else int(row["streak"]),
+    }
+
+
+def upsert_push_subscription(
+    conn: sqlite3.Connection,
+    *,
+    player_id: str,
+    endpoint: str,
+    p256dh: str,
+    auth: str,
+    tz: str,
+    streak: int | None = None,
+) -> dict[str, Any]:
+    """Crée ou met à jour (par endpoint) l'abonnement ; le réactive s'il était désactivé."""
+    conn.execute(
+        """
+        INSERT INTO push_subscriptions (player_id, endpoint, p256dh, auth, tz, enabled, streak)
+        VALUES (?, ?, ?, ?, ?, 1, ?)
+        ON CONFLICT(endpoint) DO UPDATE SET
+            player_id=excluded.player_id,
+            p256dh=excluded.p256dh,
+            auth=excluded.auth,
+            tz=excluded.tz,
+            enabled=1,
+            streak=COALESCE(excluded.streak, push_subscriptions.streak)
+        """,
+        (player_id, endpoint, p256dh, auth, tz, streak),
+    )
+    row = conn.execute("SELECT * FROM push_subscriptions WHERE endpoint = ?", (endpoint,)).fetchone()
+    return _push_row(row)
+
+
+def get_push_subscription(conn: sqlite3.Connection, endpoint: str) -> dict[str, Any] | None:
+    row = conn.execute("SELECT * FROM push_subscriptions WHERE endpoint = ?", (endpoint,)).fetchone()
+    return _push_row(row) if row else None
+
+
+def delete_push_subscription(conn: sqlite3.Connection, endpoint: str) -> bool:
+    cur = conn.execute("DELETE FROM push_subscriptions WHERE endpoint = ?", (endpoint,))
+    return cur.rowcount > 0
+
+
+def delete_push_subscription_by_id(conn: sqlite3.Connection, sub_id: int) -> bool:
+    cur = conn.execute("DELETE FROM push_subscriptions WHERE id = ?", (sub_id,))
+    return cur.rowcount > 0
+
+
+def list_push_subscriptions(conn: sqlite3.Connection, enabled_only: bool = True) -> list[dict[str, Any]]:
+    sql = "SELECT * FROM push_subscriptions"
+    if enabled_only:
+        sql += " WHERE enabled = 1"
+    return [_push_row(r) for r in conn.execute(sql + " ORDER BY id").fetchall()]
+
+
+def push_subscriptions_for_player(conn: sqlite3.Connection, player_id: str) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        "SELECT * FROM push_subscriptions WHERE player_id = ? AND enabled = 1 ORDER BY id",
+        (player_id,),
+    ).fetchall()
+    return [_push_row(r) for r in rows]
+
+
+def mark_push_sent(conn: sqlite3.Connection, sub_id: int, day_iso: str) -> None:
+    conn.execute("UPDATE push_subscriptions SET last_sent_day = ? WHERE id = ?", (day_iso, sub_id))
+
+
+def has_complete_result_on_day(conn: sqlite3.Connection, day_iso: str, player_id: str) -> bool:
+    """Vrai si le joueur a un résultat COMPLET (played ≥ taille du set) ce jour, toutes catégories."""
+    row = conn.execute(
+        """
+        SELECT 1 FROM daily_results r
+        JOIN daily_sets s ON s.date = r.date AND s.category_key = r.category_key
+        WHERE r.date = ? AND r.player_id = ? AND r.played >= json_array_length(s.quote_ids)
+        LIMIT 1
+        """,
+        (day_iso, player_id),
+    ).fetchone()
+    return row is not None
+
+
+def server_streak(conn: sqlite3.Connection, player_id: str, today_iso: str) -> int:
+    """Série connue côté serveur : jours consécutifs (en remontant depuis hier, ou aujourd'hui
+    s'il est joué) avec un résultat complet. Sans gel : c'est une borne basse de la série client."""
+    from datetime import date, timedelta
+
+    rows = conn.execute(
+        """
+        SELECT DISTINCT r.date FROM daily_results r
+        JOIN daily_sets s ON s.date = r.date AND s.category_key = r.category_key
+        WHERE r.player_id = ? AND r.played >= json_array_length(s.quote_ids) AND r.date <= ?
+        """,
+        (player_id, today_iso),
+    ).fetchall()
+    days = {r["date"] for r in rows}
+    if not days:
+        return 0
+    cur = date.fromisoformat(today_iso)
+    if today_iso not in days:
+        cur -= timedelta(days=1)
+    n = 0
+    while cur.isoformat() in days:
+        n += 1
+        cur -= timedelta(days=1)
+    return n
+
+
+def mark_challenge_notified(conn: sqlite3.Connection, code: str) -> bool:
+    """Marque le défi comme notifié ; renvoie False s'il l'était déjà (un seul envoi par défi)."""
+    cur = conn.execute(
+        "UPDATE daily_challenges SET notified_at = datetime('now') WHERE code = ? AND notified_at IS NULL",
+        (code,),
+    )
+    return cur.rowcount > 0

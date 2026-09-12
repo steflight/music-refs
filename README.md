@@ -34,6 +34,7 @@ Admin (catalogue + import) : http://127.0.0.1:8084/admin.html
 
 - Solo : filtre catégorie en haut de `/`
 - Salon : `/party.html` (code à partager)
+- Profil de culture musicale (MR-15) : `/profil` — agrégats locaux (`localStorage` clé `mr:profile`), visible à partir de 20 citations répondues, image story 1080×1920 téléchargeable
 - Admin : créer catégories + cocher punchlines → Assigner
 - Conception : [docs/conception/02-categories-et-parties.md](docs/conception/02-categories-et-parties.md)
 
@@ -127,6 +128,27 @@ Scripts `scripts/cert_manager.py`, `scripts/ssl_monitor.py` et `certs/` : tâche
   - % parties partagées = (joueur, jour) avec `share_clicked` ÷ (joueur, jour) avec `daily_completed`.
   - k-factor ≈ `share_landed` ÷ `daily_completed` (comptes bruts sur la fenêtre).
 
+## Rappel quotidien Web Push (MR-08) & notification de défi (MR-14)
+
+PWA installable (`manifest.webmanifest`, icônes `icons/`, `sw.js`) + Web Push VAPID.
+
+- Variables : `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` (mailto:), `PUSH_REMINDER_HOUR`
+  (défaut 19), `PUSH_SCHEDULER_ENABLED` (défaut 1). Générer les clés : `python3 scripts/gen_vapid.py --append .env`.
+  Sans clés, l'API démarre normalement, push désactivé (log `VAPID … absentes`).
+- API : `GET /api/music-refs/push/public-key` · `POST /api/music-refs/push/subscribe`
+  `{player_id, subscription{endpoint, keys{p256dh, auth}}, tz, streak?}` · `DELETE /api/music-refs/push/subscribe {endpoint}`.
+  Table `push_subscriptions` (un abonnement par endpoint, fuseau IANA du joueur).
+- Planificateur (`backend/push.py`) : tâche asyncio au démarrage, un tick par minute ; à 19 h **locale**
+  (fuseau `tz`), si le joueur n'a pas de résultat complet du jour (date Toronto), envoi de
+  « 🔥 Ta série de N jours expire dans 5 h. Les refs du jour t'attendent. » (sans N si série inconnue),
+  une fois par jour (`last_sent_day`). Endpoint 404/410 → abonnement supprimé.
+- MR-14 : quand l'ami termine un défi (`POST /daily/result` avec `challenge_code`), le créateur abonné
+  reçoit « <pseudo> a fait X/5 sur ton défi 😱 » (un seul envoi par défi, colonne `notified_at`).
+- Front (`daily.html`) : bloc « Reçois un rappel à 19 h si tu n'as pas joué » sous l'écran de fin,
+  proposé seulement après la 2e partie terminée ; réglage « Rappel quotidien : activé/désactivé »
+  persistant (`mr:push`) ; masqué si `Notification`/`PushManager` absents (iOS Safari non installé).
+- Tests : `cd backend && python3 -m pytest tests/test_push.py -q` (envoi mocké).
+
 ## Contrats d'API — sécurité (SEC-01 → SEC-04, 2026-09-12)
 
 | Route | Comportement |
@@ -142,3 +164,15 @@ Scripts `scripts/cert_manager.py`, `scripts/ssl_monitor.py` et `certs/` : tâche
 | Toute écriture publique | 429 au-delà de `RATE_LIMIT_PER_MINUTE` (défaut 120) par IP. |
 
 Barème (`backend/scoring.py`) : artiste 100 + titre 100 + 50 si complet, −20 par indice, × rareté (commune 1, rare 2, légendaire 3).
+
+## Contenu communautaire (MR-16 / MR-17, 2026-09-12)
+
+| Route | Auth | Rôle |
+|---|---|---|
+| `GET /proposer` | — | Formulaire « Proposer une punchline » |
+| `POST /api/music-refs/submissions` | public | Proposition → `pending` ; 409 doublon, 422 validation/pseudo, 429 au-delà de 10/jour |
+| `GET /api/music-refs/submissions?status=` | admin | Liste + compteurs (onglet « Propositions » de l'admin) |
+| `POST /api/music-refs/submissions/{id}/approve` · `/reject` | admin | Approbation crée la citation, +50 points et badge `contributeur` |
+| `GET /api/music-refs/players/{player_id}/rewards` | public | `{points, badges[]}` |
+| `POST /api/music-refs/quotes/{id}/vote` | public | `{player_id, value: 1|-1}`, un vote par joueur, 403 si la citation n'a pas été jouée |
+| `GET /api/music-refs/quotes/flagged` | admin | Citations ≥ 30 votes et 👎 > 40 % (onglet « Signalées ») |
