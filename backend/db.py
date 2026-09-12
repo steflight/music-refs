@@ -25,6 +25,11 @@ DEFAULT_CATEGORIES = [
         "name": "Personnage public / influenceur",
         "description": "Punchlines d’influenceurs & figures publiques (Cameroun et ailleurs)",
     },
+    {
+        "slug": "gospel",
+        "name": "Gospel",
+        "description": "Gospel francophone & anglophone",
+    },
 ]
 
 
@@ -143,6 +148,59 @@ def init_db() -> None:
         cols = {r[1] for r in conn.execute("PRAGMA table_info(party_players)").fetchall()}
         if "progress" not in cols:
             conn.execute("ALTER TABLE party_players ADD COLUMN progress INTEGER NOT NULL DEFAULT 0")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS daily_sets (
+                date TEXT NOT NULL,
+                category_key TEXT NOT NULL,
+                edition INTEGER NOT NULL,
+                quote_ids TEXT NOT NULL,
+                created_at TEXT DEFAULT (datetime('now')),
+                PRIMARY KEY (date, category_key)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS daily_results (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                category_key TEXT NOT NULL,
+                edition INTEGER NOT NULL,
+                player_id TEXT NOT NULL,
+                pseudo TEXT DEFAULT '',
+                score INTEGER NOT NULL DEFAULT 0,
+                correct INTEGER NOT NULL DEFAULT 0,
+                hints INTEGER NOT NULL DEFAULT 0,
+                time_ms INTEGER NOT NULL DEFAULT 0,
+                grid TEXT NOT NULL DEFAULT '',
+                created_at TEXT DEFAULT (datetime('now')),
+                UNIQUE(date, category_key, player_id)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS daily_challenges (
+                code TEXT PRIMARY KEY,
+                date TEXT NOT NULL,
+                category_key TEXT NOT NULL,
+                category_id INTEGER,
+                creator_player_id TEXT NOT NULL,
+                creator_pseudo TEXT DEFAULT '',
+                creator_score INTEGER NOT NULL DEFAULT 0,
+                creator_correct INTEGER NOT NULL DEFAULT 0,
+                creator_grid TEXT NOT NULL DEFAULT '',
+                created_at TEXT DEFAULT (datetime('now'))
+            )
+            """
+        )
+        # MR-04 / MR-09 — colonnes quotes (migration douce)
+        quote_cols = {r[1] for r in conn.execute("PRAGMA table_info(quotes)").fetchall()}
+        if "listen_url" not in quote_cols:
+            conn.execute("ALTER TABLE quotes ADD COLUMN listen_url TEXT DEFAULT ''")
+        if "rarity" not in quote_cols:
+            conn.execute("ALTER TABLE quotes ADD COLUMN rarity TEXT NOT NULL DEFAULT 'commune'")
         _seed_categories(conn)
 
 
@@ -203,12 +261,25 @@ def _guess_category_slugs(genre: str, artist: str, title: str) -> list[str]:
     return out
 
 
+def _row_get(row: sqlite3.Row, key: str, default: Any = "") -> Any:
+    try:
+        val = row[key]
+        return default if val is None else val
+    except (IndexError, KeyError):
+        return default
+
+
 def row_to_quote(row: sqlite3.Row, category_ids: list[int] | None = None) -> dict[str, Any]:
+    rarity = str(_row_get(row, "rarity", "commune") or "commune").lower()
+    if rarity not in {"commune", "rare", "legendaire"}:
+        rarity = "commune"
     data = {
         "id": row["id"],
         "quote": row["quote"],
         "artist": row["artist"],
         "title": row["title"],
+        "listen_url": str(_row_get(row, "listen_url", "") or ""),
+        "rarity": rarity,
         "hints": {
             "year": row["year"] or "",
             "genre": row["genre"] or "",
@@ -287,19 +358,27 @@ def insert_quote(
     genre: str = "",
     album: str = "",
     initials: str = "",
+    listen_url: str = "",
+    rarity: str = "commune",
     category_ids: list[int] | None = None,
 ) -> dict[str, Any]:
+    rarity_n = (rarity or "commune").lower().strip()
+    if rarity_n not in {"commune", "rare", "legendaire"}:
+        rarity_n = "commune"
+    url = (listen_url or "").strip()[:500]
     conn.execute(
         """
-        INSERT INTO quotes (quote, artist, title, year, genre, album, initials)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO quotes (quote, artist, title, year, genre, album, initials, listen_url, rarity)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(quote, artist, title) DO UPDATE SET
             year=excluded.year,
             genre=excluded.genre,
             album=excluded.album,
-            initials=excluded.initials
+            initials=excluded.initials,
+            listen_url=excluded.listen_url,
+            rarity=excluded.rarity
         """,
-        (quote.strip(), artist.strip(), title.strip(), year, genre, album, initials),
+        (quote.strip(), artist.strip(), title.strip(), year, genre, album, initials, url, rarity_n),
     )
     row = conn.execute(
         "SELECT * FROM quotes WHERE quote = ? AND artist = ? AND title = ?",
@@ -312,6 +391,41 @@ def insert_quote(
                 (row["id"], cid),
             )
     return get_quote(conn, row["id"])  # type: ignore[arg-type]
+
+
+def update_quote(
+    conn: sqlite3.Connection,
+    quote_id: int,
+    *,
+    listen_url: str | None = None,
+    rarity: str | None = None,
+    artist: str | None = None,
+    title: str | None = None,
+    quote: str | None = None,
+) -> dict[str, Any] | None:
+    existing = get_quote(conn, quote_id)
+    if not existing:
+        return None
+    new_url = existing.get("listen_url") or ""
+    if listen_url is not None:
+        new_url = listen_url.strip()[:500]
+    new_rarity = existing.get("rarity") or "commune"
+    if rarity is not None:
+        new_rarity = rarity.lower().strip()
+        if new_rarity not in {"commune", "rare", "legendaire"}:
+            new_rarity = "commune"
+    new_artist = artist.strip() if artist is not None else existing["artist"]
+    new_title = title.strip() if title is not None else existing["title"]
+    new_quote = quote.strip() if quote is not None else existing["quote"]
+    conn.execute(
+        """
+        UPDATE quotes
+        SET quote = ?, artist = ?, title = ?, listen_url = ?, rarity = ?
+        WHERE id = ?
+        """,
+        (new_quote, new_artist, new_title, new_url, new_rarity, quote_id),
+    )
+    return get_quote(conn, quote_id)
 
 
 def delete_quote(conn: sqlite3.Connection, quote_id: int) -> bool:
@@ -678,3 +792,261 @@ def party_snapshot(
         "me": me,
         "quote_count": quote_count,
     }
+
+
+def _pool_for_daily(conn: sqlite3.Connection, category_id: int | None) -> list[dict[str, Any]]:
+    if category_id is None:
+        rows = conn.execute("SELECT id, rarity FROM quotes ORDER BY id").fetchall()
+    else:
+        rows = conn.execute(
+            """
+            SELECT q.id, q.rarity FROM quotes q
+            JOIN quote_categories qc ON qc.quote_id = q.id
+            WHERE qc.category_id = ?
+            ORDER BY q.id
+            """,
+            (category_id,),
+        ).fetchall()
+    pool = []
+    for r in rows:
+        cats = [
+            int(x[0])
+            for x in conn.execute(
+                "SELECT category_id FROM quote_categories WHERE quote_id = ?",
+                (r["id"],),
+            ).fetchall()
+        ]
+        rarity = str(r["rarity"] or "commune").lower()
+        if rarity not in {"commune", "rare", "legendaire"}:
+            rarity = "commune"
+        pool.append({"id": int(r["id"]), "category_ids": cats, "rarity": rarity})
+    return pool
+
+
+def _recent_daily_quote_ids(conn: sqlite3.Connection, category_key: str, before: str, days: int) -> set[int]:
+    from datetime import date as date_cls
+    from datetime import timedelta
+
+    cutoff = (date_cls.fromisoformat(before) - timedelta(days=days)).isoformat()
+    rows = conn.execute(
+        """
+        SELECT quote_ids FROM daily_sets
+        WHERE category_key = ? AND date < ? AND date >= ?
+        """,
+        (category_key, before, cutoff),
+    ).fetchall()
+    out: set[int] = set()
+    for row in rows:
+        try:
+            ids = json.loads(row["quote_ids"])
+            out.update(int(i) for i in ids)
+        except Exception:
+            continue
+    return out
+
+
+def get_or_create_daily_set(
+    conn: sqlite3.Connection,
+    day_iso: str,
+    category_key: str,
+    category_id: int | None,
+) -> dict[str, Any]:
+    from datetime import date as date_cls
+
+    from daily import edition_number, pick_quote_ids
+
+    existing = conn.execute(
+        "SELECT * FROM daily_sets WHERE date = ? AND category_key = ?",
+        (day_iso, category_key),
+    ).fetchone()
+    if existing:
+        return {
+            "date": existing["date"],
+            "category_key": existing["category_key"],
+            "edition": int(existing["edition"]),
+            "quote_ids": json.loads(existing["quote_ids"]),
+        }
+
+    day = date_cls.fromisoformat(day_iso)
+    pool = _pool_for_daily(conn, category_id)
+    if len(pool) < 1:
+        raise ValueError("empty_pool")
+    recent = _recent_daily_quote_ids(conn, category_key, day_iso, 90)
+    ids = pick_quote_ids(pool, day, category_key, recent, size=min(5, len(pool)))
+    ed = edition_number(day)
+    conn.execute(
+        """
+        INSERT INTO daily_sets (date, category_key, edition, quote_ids)
+        VALUES (?, ?, ?, ?)
+        """,
+        (day_iso, category_key, ed, json.dumps(ids)),
+    )
+    return {"date": day_iso, "category_key": category_key, "edition": ed, "quote_ids": ids}
+
+
+def quote_play_view(q: dict[str, Any]) -> dict[str, Any]:
+    hints = q.get("hints") or {}
+    rarity = (q.get("rarity") or "commune").lower()
+    if rarity not in {"commune", "rare", "legendaire"}:
+        rarity = "commune"
+    return {
+        "id": q["id"],
+        "quote": q["quote"],
+        "rarity": rarity,
+        "hints": {
+            "year": hints.get("year") or "",
+            "genre": hints.get("genre") or "",
+            "album": hints.get("album") or "",
+        },
+        "category_ids": q.get("category_ids") or [],
+    }
+
+
+def quote_reveal_view(q: dict[str, Any]) -> dict[str, Any]:
+    rarity = (q.get("rarity") or "commune").lower()
+    if rarity not in {"commune", "rare", "legendaire"}:
+        rarity = "commune"
+    return {
+        "id": q["id"],
+        "quote": q["quote"],
+        "artist": q["artist"],
+        "title": q["title"],
+        "listen_url": q.get("listen_url") or "",
+        "rarity": rarity,
+    }
+
+
+def upsert_daily_result(
+    conn: sqlite3.Connection,
+    *,
+    day_iso: str,
+    category_key: str,
+    edition: int,
+    player_id: str,
+    pseudo: str,
+    score: int,
+    correct: int,
+    hints: int,
+    time_ms: int,
+    grid: str,
+) -> dict[str, Any]:
+    conn.execute(
+        """
+        INSERT INTO daily_results
+            (date, category_key, edition, player_id, pseudo, score, correct, hints, time_ms, grid)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(date, category_key, player_id) DO UPDATE SET
+            pseudo=excluded.pseudo,
+            score=excluded.score,
+            correct=excluded.correct,
+            hints=excluded.hints,
+            time_ms=excluded.time_ms,
+            grid=excluded.grid
+        """,
+        (day_iso, category_key, edition, player_id, (pseudo or "")[:40], score, correct, hints, time_ms, grid),
+    )
+    return {
+        "date": day_iso,
+        "category_key": category_key,
+        "edition": edition,
+        "player_id": player_id,
+        "score": score,
+        "correct": correct,
+    }
+
+
+def daily_leaderboard(conn: sqlite3.Connection, day_iso: str, category_key: str, limit: int = 10) -> list[dict]:
+    rows = conn.execute(
+        """
+        SELECT pseudo, score, correct, hints, time_ms, grid
+        FROM daily_results
+        WHERE date = ? AND category_key = ?
+        ORDER BY score DESC, hints ASC, time_ms ASC
+        LIMIT ?
+        """,
+        (day_iso, category_key, limit),
+    ).fetchall()
+    return [
+        {
+            "pseudo": r["pseudo"] or "Anonyme",
+            "score": int(r["score"]),
+            "correct": int(r["correct"]),
+            "hints": int(r["hints"]),
+            "time_ms": int(r["time_ms"]),
+            "grid": r["grid"] or "",
+        }
+        for r in rows
+    ]
+
+
+def count_daily_players(conn: sqlite3.Connection, day_iso: str, category_key: str) -> int:
+    return int(
+        conn.execute(
+            "SELECT COUNT(*) FROM daily_results WHERE date = ? AND category_key = ?",
+            (day_iso, category_key),
+        ).fetchone()[0]
+    )
+
+
+def create_daily_challenge(
+    conn: sqlite3.Connection,
+    *,
+    code: str,
+    day_iso: str,
+    category_key: str,
+    category_id: int | None,
+    creator_player_id: str,
+    creator_pseudo: str,
+    creator_score: int,
+    creator_correct: int,
+    creator_grid: str,
+) -> dict[str, Any]:
+    conn.execute(
+        """
+        INSERT INTO daily_challenges
+            (code, date, category_key, category_id, creator_player_id, creator_pseudo,
+             creator_score, creator_correct, creator_grid)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            code,
+            day_iso,
+            category_key,
+            category_id,
+            creator_player_id,
+            (creator_pseudo or "")[:40],
+            creator_score,
+            creator_correct,
+            creator_grid,
+        ),
+    )
+    return get_daily_challenge(conn, code)  # type: ignore[return-value]
+
+
+def get_daily_challenge(conn: sqlite3.Connection, code: str) -> dict[str, Any] | None:
+    row = conn.execute("SELECT * FROM daily_challenges WHERE code = ?", (code.upper(),)).fetchone()
+    if not row:
+        row = conn.execute("SELECT * FROM daily_challenges WHERE code = ?", (code,)).fetchone()
+    if not row:
+        return None
+    return {
+        "code": row["code"],
+        "date": row["date"],
+        "category_key": row["category_key"],
+        "category_id": row["category_id"],
+        "creator_player_id": row["creator_player_id"],
+        "creator_pseudo": row["creator_pseudo"] or "Anonyme",
+        "creator_score": int(row["creator_score"]),
+        "creator_correct": int(row["creator_correct"]),
+        "creator_grid": row["creator_grid"] or "",
+    }
+
+
+def new_challenge_code(conn: sqlite3.Connection) -> str:
+    alphabet = string.ascii_uppercase + string.digits
+    for _ in range(20):
+        code = "".join(secrets.choice(alphabet) for _ in range(6))
+        exists = conn.execute("SELECT 1 FROM daily_challenges WHERE code = ?", (code,)).fetchone()
+        if not exists:
+            return code
+    raise RuntimeError("unable to allocate challenge code")

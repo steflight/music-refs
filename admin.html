@@ -172,16 +172,26 @@
           row.className = 'rounded-xl border border-white/10 bg-black/20 p-3 space-y-2';
           const hints = q.hints || {};
           const catNames = (q.category_ids || []).map((id) => catMap[id] || id).join(', ') || '—';
+          const rarity = q.rarity || 'commune';
           row.innerHTML = `
             <div class="flex items-start justify-between gap-3">
-              <label class="flex items-start gap-2 min-w-0">
+              <label class="flex items-start gap-2 min-w-0 flex-1">
                 <input type="checkbox" class="mt-1 assign-quote" value="${q.id}" />
-                <div class="space-y-1">
-                  <p class="text-[10px] uppercase tracking-wide text-slate-500">#${q.id} · Question</p>
+                <div class="space-y-1 min-w-0 w-full">
+                  <p class="text-[10px] uppercase tracking-wide text-slate-500">#${q.id} · ${escapeHtml(rarity)} · Question</p>
                   <p class="text-sm text-slate-100">« ${escapeHtml(q.quote)} »</p>
                   <p class="text-xs text-neonCyan"><span class="text-slate-500">Réponse :</span> <strong>${escapeHtml(q.artist)}</strong> — ${escapeHtml(q.title)}</p>
                   <p class="text-[11px] text-slate-500">${escapeHtml(hints.album || '—')} · ${escapeHtml(hints.year || '—')}</p>
                   <p class="text-[11px] text-purple-300">Catégories : ${escapeHtml(catNames)}</p>
+                  <div class="grid sm:grid-cols-3 gap-2 pt-1" data-edit-row="${q.id}">
+                    <input data-listen class="rounded-lg bg-black/40 border border-white/10 px-2 py-1 text-[11px]" placeholder="listen_url" value="${escapeHtml(q.listen_url || '')}" />
+                    <select data-rarity class="rounded-lg bg-black/40 border border-white/10 px-2 py-1 text-[11px]">
+                      <option value="commune" ${rarity === 'commune' ? 'selected' : ''}>commune</option>
+                      <option value="rare" ${rarity === 'rare' ? 'selected' : ''}>rare</option>
+                      <option value="legendaire" ${rarity === 'legendaire' ? 'selected' : ''}>légendaire</option>
+                    </select>
+                    <button type="button" data-save-meta="${q.id}" class="text-[11px] rounded-lg border border-neonCyan/40 text-neonCyan px-2 py-1">Sauver meta</button>
+                  </div>
                 </div>
               </label>
               <button type="button" data-del="${q.id}"
@@ -195,9 +205,33 @@
         box.querySelectorAll('[data-del]').forEach((btn) => {
           btn.addEventListener('click', () => deleteQuote(Number(btn.getAttribute('data-del'))));
         });
+        box.querySelectorAll('[data-save-meta]').forEach((btn) => {
+          btn.addEventListener('click', () => saveMeta(Number(btn.getAttribute('data-save-meta')), btn.closest('[data-edit-row]')));
+        });
       } catch (err) {
         $('catalog-meta').textContent = 'Erreur: ' + err.message;
         box.innerHTML = '';
+      }
+    }
+
+    async function saveMeta(id, row) {
+      if (!tokenInput.value.trim()) {
+        $('status').textContent = 'Token admin requis.';
+        return;
+      }
+      const listen_url = row.querySelector('[data-listen]')?.value?.trim() || '';
+      const rarity = row.querySelector('[data-rarity]')?.value || 'commune';
+      try {
+        const res = await fetch(`/api/music-refs/quotes/${id}`, {
+          method: 'PATCH',
+          headers: headers(),
+          body: JSON.stringify({ listen_url, rarity }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || JSON.stringify(data));
+        $('status').textContent = `#${id} mis à jour (${rarity}).`;
+      } catch (err) {
+        $('status').textContent = 'Erreur: ' + err.message;
       }
     }
 

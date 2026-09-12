@@ -1,0 +1,771 @@
+<!DOCTYPE html>
+<html lang="fr" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0f19">
+  <meta name="description" content="Refs du jour — Music Refs">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <title>Music Refs — Refs du jour</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;900&family=Orbitron:wght@700;900&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Montserrat', 'sans-serif'], display: ['Orbitron', 'sans-serif'] },
+          colors: { neonPink: '#ff007f', neonCyan: '#00f0ff' }
+        }
+      }
+    }
+  </script>
+  <style>
+    :root { --safe-top: env(safe-area-inset-top,0px); --safe-bottom: env(safe-area-inset-bottom,0px); }
+    body {
+      background: #0b0f19;
+      background-image:
+        radial-gradient(at 15% 10%, rgba(255,0,127,.14), transparent 45%),
+        radial-gradient(at 85% 90%, rgba(0,240,255,.1), transparent 45%);
+      padding-top: max(.75rem, var(--safe-top));
+      padding-bottom: max(.75rem, var(--safe-bottom));
+      min-height: 100dvh;
+    }
+    input, select, button { font-size: 16px; touch-action: manipulation; }
+    .tap { min-height: 48px; }
+    .panel { background: rgba(21,28,46,.9); backdrop-filter: blur(12px); }
+    .quote-card { transition: box-shadow .25s ease, border-color .25s ease; }
+    .quote-card.rarity-rare { border-color: rgba(0,240,255,.55); box-shadow: 0 0 24px rgba(0,240,255,.18); }
+    .quote-card.rarity-legendaire { border-color: rgba(168,85,247,.7); box-shadow: 0 0 28px rgba(168,85,247,.28); }
+    @keyframes shake-x {
+      0%, 100% { transform: translateX(0); }
+      20% { transform: translateX(-7px); }
+      40% { transform: translateX(7px); }
+      60% { transform: translateX(-5px); }
+      80% { transform: translateX(5px); }
+    }
+    .shake { animation: shake-x .38s ease; }
+    @media (prefers-reduced-motion: reduce) {
+      .shake { animation: none; }
+      .quote-card { transition: none; }
+    }
+  </style>
+</head>
+<body class="text-slate-200 font-sans px-3 py-3 sm:p-6">
+  <div class="max-w-xl mx-auto space-y-4">
+    <header class="flex items-center justify-between gap-2">
+      <div class="min-w-0">
+        <p class="text-[10px] uppercase tracking-widest text-slate-500">Rituel quotidien</p>
+        <h1 id="edition-title" class="font-display text-xl sm:text-2xl text-transparent bg-clip-text bg-gradient-to-r from-neonPink to-neonCyan truncate">Refs du jour</h1>
+      </div>
+      <div class="flex items-center gap-2 shrink-0">
+        <button type="button" data-sfx-toggle class="tap w-11 rounded-xl border border-white/15 bg-black/40" title="Son">🔊</button>
+        <a href="/" class="tap inline-flex items-center px-3 rounded-xl border border-white/15 text-sm">Infini</a>
+        <a href="/party.html" class="tap inline-flex items-center px-3 rounded-xl border border-neonPink/40 text-neonPink text-sm font-semibold">Amis</a>
+      </div>
+    </header>
+
+    <div class="panel rounded-2xl border border-white/10 p-3 flex gap-2">
+      <div class="flex-1 text-center rounded-xl bg-neonCyan/10 border border-neonCyan/30 py-2">
+        <p class="text-[10px] uppercase text-neonCyan/80">Score</p>
+        <p id="hud-score" class="font-display text-2xl text-neonCyan">0</p>
+      </div>
+      <div class="flex-1 text-center rounded-xl bg-neonPink/10 border border-neonPink/30 py-2">
+        <p class="text-[10px] uppercase text-neonPink/80">🔥 Série</p>
+        <p id="hud-streak" class="font-display text-2xl text-neonPink">0</p>
+      </div>
+      <div class="flex-1 text-center rounded-xl bg-white/5 border border-white/10 py-2">
+        <p class="text-[10px] uppercase text-slate-400">🧊 Gel</p>
+        <p id="hud-freeze" class="font-display text-2xl text-white">1</p>
+      </div>
+      <div class="flex-1 text-center rounded-xl bg-white/5 border border-white/10 py-2">
+        <p class="text-[10px] uppercase text-slate-400">Combo</p>
+        <p id="hud-combo" class="font-display text-2xl text-white">0</p>
+      </div>
+    </div>
+    <p id="freeze-toast" class="hidden text-center text-xs text-amber-300"></p>
+
+    <label class="block text-xs text-slate-400">Catégorie
+      <select id="daily-cat" class="tap mt-1 w-full rounded-xl bg-black/40 border border-white/10 px-3 text-white"></select>
+    </label>
+
+    <div id="challenge-banner" class="hidden panel rounded-2xl border border-purple-400/40 p-3 text-sm text-purple-200"></div>
+
+    <!-- PLAY -->
+    <section id="play" class="panel rounded-2xl border border-purple-500/25 p-4 sm:p-6 space-y-4">
+      <div class="flex justify-between text-xs text-slate-400">
+        <span id="progress-label">1 / 5</span>
+        <span id="cat-label"></span>
+      </div>
+      <div id="quote-card" class="quote-card bg-black/50 rounded-2xl border border-white/10 p-5">
+        <p id="rarity-badge" class="hidden text-center text-[10px] uppercase tracking-widest mb-2"></p>
+        <p id="quote-text" class="text-lg sm:text-xl font-semibold italic text-center leading-relaxed">Chargement…</p>
+      </div>
+      <div id="hints-row" class="flex flex-wrap gap-2">
+        <button type="button" data-hint="year" class="tap flex-1 min-w-[7rem] rounded-xl border border-white/15 text-sm">📅 Année (-20)</button>
+        <button type="button" data-hint="genre" class="tap flex-1 min-w-[7rem] rounded-xl border border-white/15 text-sm">🎵 Genre (-20)</button>
+        <button type="button" data-hint="album" class="tap flex-1 min-w-[7rem] rounded-xl border border-white/15 text-sm">💿 Album (-20)</button>
+      </div>
+      <p id="hint-out" class="text-xs text-neonCyan hidden"></p>
+      <form id="form" class="space-y-3">
+        <input id="in-artist" class="tap w-full rounded-xl bg-black/40 border border-white/10 px-4 text-white" placeholder="Artiste" autocomplete="off" autocapitalize="words" />
+        <input id="in-title" class="tap w-full rounded-xl bg-black/40 border border-white/10 px-4 text-white" placeholder="Titre" autocomplete="off" enterkeyhint="go" />
+        <button class="tap w-full rounded-xl bg-gradient-to-r from-neonPink to-purple-600 font-bold">Valider</button>
+      </form>
+      <button type="button" id="btn-skip" class="tap w-full rounded-xl border border-white/15 text-sm text-slate-300">Passer</button>
+      <p id="toast" class="text-sm text-center text-slate-400 min-h-[1.25rem]"></p>
+    </section>
+
+    <!-- END -->
+    <section id="end" class="hidden panel rounded-2xl border border-neonCyan/30 p-4 sm:p-6 space-y-4">
+      <h2 class="font-display text-xl text-neonCyan">Terminé !</h2>
+      <p id="end-summary" class="text-sm text-slate-300"></p>
+      <pre id="share-block" class="bg-black/50 rounded-xl p-4 text-sm whitespace-pre-wrap border border-white/10 font-mono leading-relaxed"></pre>
+      <div class="grid gap-2">
+        <button type="button" id="btn-share" class="tap w-full rounded-xl bg-gradient-to-r from-neonPink to-purple-600 font-semibold">Partager</button>
+        <button type="button" id="btn-challenge" class="tap w-full rounded-xl border border-purple-400/50 text-purple-200 font-semibold">Défier un ami</button>
+        <a id="btn-wa" class="tap inline-flex items-center justify-center w-full rounded-xl border border-emerald-500/40 text-emerald-300 font-semibold" target="_blank" rel="noopener">Envoyer sur WhatsApp</a>
+        <button type="button" id="btn-copy" class="tap w-full rounded-xl border border-white/15 text-sm">Copier le bloc</button>
+      </div>
+      <p id="challenge-link" class="hidden text-xs text-center text-purple-300 break-all"></p>
+
+      <div id="reveals-box" class="space-y-2 border-t border-white/10 pt-4">
+        <h3 class="font-semibold text-sm text-white">Réponses du jour</h3>
+        <div id="reveals-list" class="space-y-2"></div>
+      </div>
+
+      <div id="pseudo-box" class="hidden space-y-2 border-t border-white/10 pt-4">
+        <p class="text-sm text-slate-300">Choisis un pseudo pour le classement (optionnel)</p>
+        <input id="pseudo-input" maxlength="16" class="tap w-full rounded-xl bg-black/40 border border-white/10 px-4" placeholder="Ex: Lex" />
+        <button type="button" id="btn-pseudo" class="tap w-full rounded-xl border border-neonCyan/40 text-neonCyan text-sm font-semibold">Enregistrer</button>
+      </div>
+      <p id="rank-line" class="text-sm text-slate-400"></p>
+
+      <div id="leaderboard-box" class="border-t border-white/10 pt-4 space-y-2">
+        <h3 class="font-semibold text-sm text-white">Top 10 du jour</h3>
+        <ol id="leaderboard-list" class="space-y-1.5 text-sm"></ol>
+      </div>
+
+      <div id="challenge-compare" class="hidden border-t border-white/10 pt-4 space-y-1 text-sm"></div>
+
+      <p id="countdown" class="text-center text-neonPink font-display text-sm"></p>
+      <a href="/?mode=infinite" class="tap inline-flex justify-center w-full rounded-xl border border-white/15 text-sm py-3">Continuer à jouer (infini)</a>
+    </section>
+
+    <div id="milestone" class="hidden fixed inset-0 z-50 bg-black/85 flex items-center justify-center p-6">
+      <div class="panel max-w-sm w-full rounded-2xl border border-neonPink/40 p-6 text-center space-y-3">
+        <p class="text-4xl">🔥</p>
+        <h3 id="milestone-title" class="font-display text-2xl text-neonPink">Série !</h3>
+        <button type="button" id="milestone-close" class="tap w-full rounded-xl bg-neonPink/20 border border-neonPink/40 text-neonPink font-semibold">Continuer</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { bindSfxToggle, playSuccess, playError, playPartial, playStreak, unlockSfx } from './src/services/sfx.js';
+    import { track } from './src/services/analytics.js';
+    import {
+      getPlayer, setPseudo, getStreak, recordDailyCompletion, applyStreakFreeze,
+      loadDailyState, saveDailyState, buildShareBlock, cellEmoji, prefersReducedMotion,
+    } from './src/services/dailyStore.js';
+
+    bindSfxToggle();
+
+    const $ = (id) => document.getElementById(id);
+    const params = new URLSearchParams(location.search);
+    const challengeCode = (location.pathname.match(/^\/d\/([A-Za-z0-9]+)/) || [])[1]
+      || params.get('challenge')
+      || params.get('d');
+
+    const state = {
+      pack: null,
+      index: 0,
+      score: 0,
+      displayedScore: 0,
+      combo: 0,
+      hintsUsedTotal: 0,
+      hintsThis: 0,
+      cells: [],
+      answers: [],
+      startedAt: Date.now(),
+      artistOk: false,
+      titleOk: false,
+      challenge: null,
+      reveals: [],
+      leaderboard: [],
+    };
+
+    let scoreAnim = null;
+
+    function toast(msg) { $('toast').textContent = msg || ''; }
+
+    function rarityLabel(r) {
+      if (r === 'legendaire') return 'Légendaire';
+      if (r === 'rare') return 'Rare';
+      return 'Commune';
+    }
+
+    function syncHud(animateScore = false) {
+      if (animateScore) rollScore(state.displayedScore, state.score);
+      else {
+        state.displayedScore = state.score;
+        $('hud-score').textContent = state.score;
+      }
+      $('hud-combo').textContent = state.combo;
+      const st = getStreak();
+      $('hud-streak').textContent = st.currentStreak || 0;
+      $('hud-freeze').textContent = st.freezes ?? 1;
+    }
+
+    function rollScore(from, to) {
+      if (prefersReducedMotion() || from === to) {
+        state.displayedScore = to;
+        $('hud-score').textContent = to;
+        return;
+      }
+      cancelAnimationFrame(scoreAnim);
+      const start = performance.now();
+      const dur = 480;
+      const step = (t) => {
+        const p = Math.min(1, (t - start) / dur);
+        const eased = 1 - (1 - p) ** 3;
+        const val = Math.round(from + (to - from) * eased);
+        state.displayedScore = val;
+        $('hud-score').textContent = val;
+        if (p < 1) scoreAnim = requestAnimationFrame(step);
+      };
+      scoreAnim = requestAnimationFrame(step);
+    }
+
+    function shakeCard() {
+      const card = $('quote-card');
+      card.classList.remove('shake');
+      void card.offsetWidth;
+      if (!prefersReducedMotion()) card.classList.add('shake');
+    }
+
+    function burstConfetti() {
+      if (typeof confetti !== 'function' || prefersReducedMotion()) return;
+      confetti({
+        particleCount: 55,
+        spread: 62,
+        origin: { y: 0.65 },
+        ticks: 40,
+        colors: ['#ff007f', '#00f0ff', '#facc15', '#a855f7'],
+        disableForReducedMotion: true,
+      });
+    }
+
+    async function loadCategories() {
+      const cats = await fetch('/api/music-refs/categories').then((r) => r.json());
+      const sel = $('daily-cat');
+      sel.innerHTML = '<option value="">Toutes</option>';
+      cats.forEach((c) => {
+        const o = document.createElement('option');
+        o.value = c.id;
+        o.textContent = `${c.name} (${c.quote_count})`;
+        if (c.quote_count < 5) o.disabled = true;
+        sel.appendChild(o);
+      });
+      const urlCat = params.get('category');
+      if (urlCat) sel.value = urlCat;
+    }
+
+    async function loadChallenge() {
+      if (!challengeCode) return;
+      try {
+        const ch = await fetch(`/api/music-refs/daily/challenge/${encodeURIComponent(challengeCode)}`).then((r) => r.json());
+        if (ch.code) {
+          state.challenge = ch;
+          $('challenge-banner').classList.remove('hidden');
+          $('challenge-banner').textContent =
+            `Défi de ${ch.creator_pseudo} — ${ch.creator_correct}/5 · ${ch.creator_score} pts · ${ch.creator_grid || ''}`;
+          if (ch.category_id != null) $('daily-cat').value = String(ch.category_id);
+          else if (ch.category_key === 'all') $('daily-cat').value = '';
+        }
+      } catch (_) { /* ignore */ }
+    }
+
+    async function loadDaily() {
+      const cat = $('daily-cat').value;
+      const qs = new URLSearchParams();
+      if (cat) qs.set('category_id', cat);
+      if (state.challenge?.date) qs.set('date', state.challenge.date);
+      const res = await fetch(`/api/music-refs/daily${qs.toString() ? `?${qs}` : ''}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Erreur daily');
+      state.pack = data;
+      $('edition-title').textContent = `Refs du jour #${data.edition}`;
+      $('cat-label').textContent = data.category_name || '';
+
+      const freezeInfo = applyStreakFreeze(data.date);
+      if (freezeInfo.froze) {
+        $('freeze-toast').textContent = '🧊 Gel consommé — ta série est sauvée !';
+        $('freeze-toast').classList.remove('hidden');
+      }
+
+      const saved = loadDailyState(data.date, data.category_key);
+      if (saved && saved.completed) {
+        Object.assign(state, saved, { pack: data, displayedScore: saved.score || 0 });
+        showEnd(false);
+        return;
+      }
+      if (saved && Array.isArray(saved.cells) && saved.cells.length < (data.quotes || []).length) {
+        Object.assign(state, saved, { pack: data, displayedScore: saved.score || 0 });
+      } else {
+        state.index = 0;
+        state.score = 0;
+        state.displayedScore = 0;
+        state.combo = 0;
+        state.hintsUsedTotal = 0;
+        state.cells = [];
+        state.answers = [];
+        state.startedAt = Date.now();
+      }
+      track('daily_started', { edition: data.edition, category: data.category_key });
+      $('play').classList.remove('hidden');
+      $('end').classList.add('hidden');
+      renderQuote();
+      syncHud(false);
+    }
+
+    function currentQuote() {
+      return state.pack?.quotes?.[state.index] || null;
+    }
+
+    function renderQuote() {
+      const q = currentQuote();
+      if (!q) return;
+      state.hintsThis = 0;
+      state.artistOk = false;
+      state.titleOk = false;
+      $('progress-label').textContent = `${state.index + 1} / ${state.pack.quotes.length}`;
+      $('quote-text').textContent = q.quote;
+      const card = $('quote-card');
+      card.classList.remove('rarity-rare', 'rarity-legendaire', 'shake');
+      const rarity = q.rarity || 'commune';
+      const badge = $('rarity-badge');
+      if (rarity === 'rare') {
+        card.classList.add('rarity-rare');
+        badge.textContent = '✦ Rare';
+        badge.className = 'text-center text-[10px] uppercase tracking-widest mb-2 text-neonCyan';
+        badge.classList.remove('hidden');
+      } else if (rarity === 'legendaire') {
+        card.classList.add('rarity-legendaire');
+        badge.textContent = '◆ Légendaire';
+        badge.className = 'text-center text-[10px] uppercase tracking-widest mb-2 text-purple-300';
+        badge.classList.remove('hidden');
+      } else {
+        badge.classList.add('hidden');
+      }
+      $('in-artist').value = '';
+      $('in-title').value = '';
+      $('in-artist').disabled = false;
+      $('in-title').disabled = false;
+      $('hint-out').classList.add('hidden');
+      toast('');
+      document.querySelectorAll('[data-hint]').forEach((b) => { b.disabled = false; });
+    }
+
+    function persist() {
+      if (!state.pack) return;
+      saveDailyState(state.pack.date, state.pack.category_key, {
+        completed: false,
+        index: state.index,
+        score: state.score,
+        combo: state.combo,
+        hintsUsedTotal: state.hintsUsedTotal,
+        cells: state.cells,
+        answers: state.answers,
+        startedAt: state.startedAt,
+        reveals: state.reveals,
+      });
+    }
+
+    async function submitAnswer(skip = false) {
+      const q = currentQuote();
+      if (!q) return;
+      unlockSfx();
+      let artistOk = false;
+      let titleOk = false;
+      let points = 0;
+      const rarity = q.rarity || 'commune';
+
+      if (!skip) {
+        const artist = $('in-artist').value.trim();
+        const title = $('in-title').value.trim();
+        if (!artist && !title) {
+          toast('Saisis artiste et/ou titre');
+          return;
+        }
+        const res = await fetch('/api/music-refs/daily/answer', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            quote_id: q.id,
+            artist,
+            title,
+            date: state.pack.date,
+            category_key: state.pack.category_key,
+          }),
+        }).then((r) => r.json());
+        artistOk = !!res.artist_ok;
+        titleOk = !!res.title_ok;
+        points = Number(res.points || 0);
+        if (res.fully_correct) {
+          playSuccess();
+          burstConfetti();
+          try { navigator.vibrate?.(30); } catch (_) {}
+          state.combo += 1;
+          if (state.combo > 1) playStreak();
+          const mult = res.multiplier && res.multiplier !== 1 ? ` ×${res.multiplier}` : '';
+          toast(`OK +${points}${mult}`);
+        } else if (artistOk || titleOk) {
+          playPartial();
+          state.combo = 0;
+          toast(`Presque ! +${points}`);
+          shakeCard();
+        } else {
+          playError();
+          state.combo = 0;
+          toast('Raté');
+          shakeCard();
+        }
+      } else {
+        playError();
+        state.combo = 0;
+        toast('Passé');
+        shakeCard();
+      }
+
+      const full = artistOk && titleOk;
+      let cellKind = 'black';
+      if (full && rarity === 'legendaire') cellKind = 'legendary';
+      else if (full && state.hintsThis > 0) cellKind = 'yellow';
+      else if (full) cellKind = 'green';
+
+      const prevScore = state.score;
+      if (full) state.score += Math.max(0, points - state.hintsThis * 20);
+      state.cells.push(cellEmoji(cellKind));
+      state.answers.push({ id: q.id, full, hints: state.hintsThis, rarity });
+      state.index += 1;
+      syncHud(full && state.score !== prevScore);
+      persist();
+
+      if (state.index >= state.pack.quotes.length) {
+        setTimeout(() => showEnd(true), prefersReducedMotion() ? 200 : 900);
+      } else {
+        setTimeout(renderQuote, prefersReducedMotion() ? 150 : (full ? 1100 : 700));
+      }
+    }
+
+    function renderLeaderboard(board, myRank, total) {
+      const list = $('leaderboard-list');
+      list.innerHTML = '';
+      if (!board || !board.length) {
+        list.innerHTML = '<li class="text-slate-500 text-xs">Personne encore — sois le premier !</li>';
+        return;
+      }
+      board.forEach((row, i) => {
+        const li = document.createElement('li');
+        const rank = i + 1;
+        const highlight = myRank === rank ? 'border-neonCyan/40 bg-neonCyan/10' : 'border-white/10 bg-black/20';
+        const secs = Math.round((row.time_ms || 0) / 1000);
+        li.className = `flex items-center justify-between gap-2 rounded-xl border ${highlight} px-3 py-2`;
+        li.innerHTML = `
+          <span class="font-mono text-xs text-slate-400 w-6">${rank}.</span>
+          <span class="flex-1 truncate font-semibold">${escapeHtml(row.pseudo || 'Anonyme')}</span>
+          <span class="text-neonCyan font-display text-sm">${row.score}</span>
+          <span class="text-[10px] text-slate-500 w-16 text-right">${row.correct}/5 · ${row.hints} ind. · ${secs}s</span>
+        `;
+        list.appendChild(li);
+      });
+      if (total) {
+        $('rank-line').textContent = myRank
+          ? `Tu es ${myRank}e sur ${total} aujourd'hui (${state.pack.category_name})`
+          : `${total} joueur(s) aujourd'hui`;
+      }
+    }
+
+    function escapeHtml(s) {
+      return String(s ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function renderReveals(reveals) {
+      const box = $('reveals-list');
+      box.innerHTML = '';
+      (reveals || []).forEach((r, i) => {
+        const ans = state.answers[i];
+        const ok = ans?.full;
+        const div = document.createElement('div');
+        div.className = 'rounded-xl border border-white/10 bg-black/30 p-3 space-y-1';
+        const listen = r.listen_url
+          ? `<a href="${escapeHtml(r.listen_url)}" target="_blank" rel="noopener" class="text-xs text-neonCyan underline">Écouter</a>`
+          : '';
+        div.innerHTML = `
+          <p class="text-[10px] uppercase text-slate-500">#${i + 1} · ${escapeHtml(rarityLabel(r.rarity))} ${ok ? '✅' : '❌'}</p>
+          <p class="text-xs text-slate-400 italic line-clamp-2">« ${escapeHtml(r.quote)} »</p>
+          <p class="text-sm"><strong class="text-neonCyan">${escapeHtml(r.artist)}</strong> — ${escapeHtml(r.title)}</p>
+          ${listen}
+        `;
+        box.appendChild(div);
+      });
+    }
+
+    async function showEnd(justFinished) {
+      $('play').classList.add('hidden');
+      $('end').classList.remove('hidden');
+      const correct = state.answers.filter((a) => a.full).length;
+      const streakInfo = justFinished
+        ? recordDailyCompletion(state.pack.date)
+        : getStreak();
+      const streak = streakInfo.currentStreak || getStreak().currentStreak || 0;
+      const freezes = streakInfo.freezes ?? getStreak().freezes ?? 1;
+      const block = buildShareBlock({
+        edition: state.pack.edition,
+        categoryName: state.pack.category_name || 'Toutes',
+        cells: state.cells.length ? state.cells : ['⬛', '⬛', '⬛', '⬛', '⬛'],
+        correct,
+        streak,
+        freezes,
+      });
+      $('share-block').textContent = block;
+      $('btn-wa').href = `https://wa.me/?text=${encodeURIComponent(block)}`;
+      $('end-summary').textContent = `${correct}/5 · ${state.hintsUsedTotal} indice(s) · score ${state.score}`;
+      syncHud(false);
+
+      if (state.challenge) {
+        const cmp = $('challenge-compare');
+        cmp.classList.remove('hidden');
+        const won = state.score > state.challenge.creator_score;
+        const tie = state.score === state.challenge.creator_score;
+        cmp.innerHTML = `
+          <h3 class="font-semibold text-white">Vs ${escapeHtml(state.challenge.creator_pseudo)}</h3>
+          <p>Toi : <strong class="text-neonCyan">${state.score}</strong> · ${correct}/5</p>
+          <p>Adversaire : <strong>${state.challenge.creator_score}</strong> · ${state.challenge.creator_correct}/5</p>
+          <p class="text-neonPink font-display">${won ? 'Tu gagnes !' : tie ? 'Égalité' : 'Il/elle mène'}</p>
+        `;
+      }
+
+      if (justFinished) {
+        saveDailyState(state.pack.date, state.pack.category_key, {
+          completed: true,
+          score: state.score,
+          cells: state.cells,
+          answers: state.answers,
+          hintsUsedTotal: state.hintsUsedTotal,
+          startedAt: state.startedAt,
+        });
+        const timeMs = Date.now() - state.startedAt;
+        track('daily_completed', { score: state.score, hints: state.hintsUsedTotal, timeMs, correct });
+        const player = getPlayer();
+        if (!player.pseudo) $('pseudo-box').classList.remove('hidden');
+        try {
+          const res = await fetch('/api/music-refs/daily/result', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              player_id: player.id,
+              pseudo: player.pseudo || '',
+              score: state.score,
+              correct,
+              hints: state.hintsUsedTotal,
+              time_ms: Math.max(timeMs, correct * 2500),
+              grid: state.cells.join(''),
+              date: state.pack.date,
+              category_key: state.pack.category_key,
+              category_id: state.pack.category_id,
+            }),
+          }).then((r) => r.json());
+          state.leaderboard = res.leaderboard || [];
+          state.reveals = res.reveals || [];
+          renderLeaderboard(state.leaderboard, res.rank, res.total_players);
+          renderReveals(state.reveals);
+          saveDailyState(state.pack.date, state.pack.category_key, {
+            completed: true,
+            score: state.score,
+            cells: state.cells,
+            answers: state.answers,
+            hintsUsedTotal: state.hintsUsedTotal,
+            startedAt: state.startedAt,
+            reveals: state.reveals,
+            leaderboard: state.leaderboard,
+            rank: res.rank,
+            total_players: res.total_players,
+          });
+          tickCountdown(res.seconds_to_next || state.pack.seconds_to_next || 0);
+        } catch (_) {
+          tickCountdown(state.pack.seconds_to_next || 0);
+          await fetchRevealsFallback();
+          await fetchBoardFallback();
+        }
+        if (streakInfo.milestone) {
+          $('milestone-title').textContent = `${streakInfo.milestone} jours de Music Refs`;
+          $('milestone').classList.remove('hidden');
+          track('streak_milestone', { days: streakInfo.milestone });
+        }
+      } else {
+        tickCountdown(state.pack.seconds_to_next || 0);
+        const player = getPlayer();
+        if (state.leaderboard?.length) {
+          renderLeaderboard(state.leaderboard, state.rank, state.total_players);
+        } else {
+          await fetchBoardFallback();
+        }
+        if (state.reveals?.length) renderReveals(state.reveals);
+        else await fetchRevealsFallback();
+        $('rank-line').textContent = player.pseudo ? `Pseudo : ${player.pseudo}` : ($('rank-line').textContent || '');
+      }
+    }
+
+    async function fetchRevealsFallback() {
+      try {
+        const qs = new URLSearchParams({
+          date: state.pack.date,
+          category_key: state.pack.category_key,
+        });
+        const data = await fetch(`/api/music-refs/daily/reveal?${qs}`).then((r) => r.json());
+        state.reveals = data.reveals || [];
+        renderReveals(state.reveals);
+      } catch (_) { /* ignore */ }
+    }
+
+    async function fetchBoardFallback() {
+      try {
+        const qs = new URLSearchParams({ date: state.pack.date });
+        if (state.pack.category_id != null) qs.set('category_id', state.pack.category_id);
+        else if (state.pack.category_key?.startsWith('cat:')) {
+          qs.set('category_id', state.pack.category_key.slice(4));
+        }
+        const data = await fetch(`/api/music-refs/daily/leaderboard?${qs}`).then((r) => r.json());
+        state.leaderboard = data.leaderboard || [];
+        renderLeaderboard(state.leaderboard, null, data.total_players);
+      } catch (_) { /* ignore */ }
+    }
+
+    function tickCountdown(seconds) {
+      const el = $('countdown');
+      let left = seconds;
+      const paint = () => {
+        const h = Math.floor(left / 3600);
+        const m = Math.floor((left % 3600) / 60);
+        el.textContent = `Prochaines refs dans ${String(h).padStart(2, '0')} h ${String(m).padStart(2, '0')}`;
+      };
+      paint();
+      clearInterval(window.__mrCd);
+      window.__mrCd = setInterval(() => {
+        left = Math.max(0, left - 60);
+        paint();
+      }, 60000);
+    }
+
+    async function share() {
+      const text = $('share-block').textContent;
+      track('share_clicked', { channel: 'share' });
+      try {
+        if (navigator.share) {
+          await navigator.share({ text });
+          return;
+        }
+      } catch (_) { /* cancel */ }
+      await navigator.clipboard.writeText(text);
+      toast('Copié !');
+    }
+
+    async function createChallenge() {
+      const player = getPlayer();
+      const correct = state.answers.filter((a) => a.full).length;
+      try {
+        const res = await fetch('/api/music-refs/daily/challenge', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            player_id: player.id,
+            pseudo: player.pseudo || 'Anonyme',
+            score: state.score,
+            correct,
+            grid: state.cells.join(''),
+            date: state.pack.date,
+            category_key: state.pack.category_key,
+            category_id: state.pack.category_id,
+          }),
+        }).then((r) => r.json());
+        if (!res.code) throw new Error(res.detail || 'Erreur défi');
+        const url = `${location.origin}/d/${res.code}`;
+        $('challenge-link').textContent = url;
+        $('challenge-link').classList.remove('hidden');
+        try {
+          await navigator.clipboard.writeText(
+            `Défie-moi sur Music Refs !\n${$('share-block').textContent}\n${url}`,
+          );
+          toast('Lien de défi copié !');
+        } catch (_) {
+          toast(`Défi : ${url}`);
+        }
+        track('challenge_created', { code: res.code });
+      } catch (e) {
+        toast(e.message || 'Défi indisponible');
+      }
+    }
+
+    $('form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      submitAnswer(false);
+    });
+    $('btn-skip').addEventListener('click', () => submitAnswer(true));
+    $('btn-share').addEventListener('click', share);
+    $('btn-challenge').addEventListener('click', createChallenge);
+    $('btn-copy').addEventListener('click', async () => {
+      await navigator.clipboard.writeText($('share-block').textContent);
+      track('share_clicked', { channel: 'copy' });
+      toast('Copié !');
+    });
+    $('btn-wa').addEventListener('click', () => track('share_clicked', { channel: 'whatsapp' }));
+    $('btn-pseudo').addEventListener('click', () => {
+      const p = setPseudo($('pseudo-input').value);
+      $('pseudo-box').classList.add('hidden');
+      $('rank-line').textContent = p.pseudo ? `Pseudo : ${p.pseudo}` : '';
+    });
+    $('milestone-close').addEventListener('click', () => $('milestone').classList.add('hidden'));
+    $('daily-cat').addEventListener('change', () => loadDaily().catch((e) => toast(e.message)));
+
+    document.querySelectorAll('[data-hint]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const q = currentQuote();
+        if (!q) return;
+        const key = btn.dataset.hint;
+        const val = q.hints?.[key];
+        if (!val) {
+          toast('Indice indisponible');
+          return;
+        }
+        state.hintsThis += 1;
+        state.hintsUsedTotal += 1;
+        $('hint-out').textContent = `${key}: ${val}`;
+        $('hint-out').classList.remove('hidden');
+        btn.disabled = true;
+        persist();
+      });
+    });
+
+    if (params.get('ref') === 'share') {
+      track('share_landed', { ref: 'share' });
+    }
+
+    // PWA light (MR-08 partiel — pas de push VAPID)
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    }
+
+    await loadCategories();
+    await loadChallenge();
+    await loadDaily().catch((e) => {
+      $('quote-text').textContent = e.message || 'Erreur';
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="neon_pink">#FFFF007F</color>
+    <color name="neon_cyan">#FF00F0FF</color>
+    <color name="bg_dark">#FF0B0F19</color>
+    <style name="Theme.MusicRefs" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">@color/bg_dark</item>
+        <item name="android:navigationBarColor">@color/bg_dark</item>
+        <item name="android:windowBackground">@color/bg_dark</item>
+        <item name="android:colorPrimary">@color/neon_pink</item>
+    </style>
+</resources>

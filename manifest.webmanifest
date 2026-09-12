@@ -1,0 +1,11 @@
+{
+  "name": "Music Refs — Refs du jour",
+  "short_name": "Music Refs",
+  "description": "Devine artiste + titre à partir d'une punchline. 5 refs par jour.",
+  "start_url": "/daily.html",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0b0f19",
+  "theme_color": "#ff007f",
+  "lang": "fr"
+}

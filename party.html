@@ -8,6 +8,7 @@
   <title>Music Refs — Partie entre amis</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;900&family=Orbitron:wght@700;900&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
   <script>
     tailwind.config = {
       theme: {
@@ -33,63 +34,147 @@
     input, select, button { font-size: 16px; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
     .tap { min-height: 48px; }
     .panel { background: rgba(21,28,46,.88); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+    @keyframes winPop {
+      0% { transform: scale(1); }
+      40% { transform: scale(1.03); }
+      100% { transform: scale(1); }
+    }
+    .animate-win-pop { animation: winPop 0.55s ease-out; }
+    /* Mobile-friendly form controls */
+    .field {
+      display: block;
+      width: 100%;
+    }
+    .field-label {
+      display: block;
+      font-size: 0.8125rem;
+      font-weight: 600;
+      color: #94a3b8;
+      margin-bottom: 0.4rem;
+    }
+    .field-control {
+      width: 100%;
+      min-height: 52px;
+      border-radius: 0.9rem;
+      background: rgba(0,0,0,.45);
+      border: 1px solid rgba(255,255,255,.12);
+      padding: 0.85rem 1rem;
+      color: #fff;
+      max-width: 100%;
+    }
+    select.field-control {
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%2394a3b8' d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 1rem center;
+      padding-right: 2.5rem;
+      text-overflow: ellipsis;
+    }
+    .setup-tab {
+      min-height: 48px;
+      border-radius: 0.9rem;
+      font-weight: 700;
+      font-size: 0.9rem;
+      border: 1px solid rgba(255,255,255,.12);
+      background: rgba(0,0,0,.25);
+      color: #94a3b8;
+      transition: .15s ease;
+    }
+    .setup-tab[aria-selected="true"] {
+      color: #fff;
+      border-color: rgba(255,0,127,.45);
+      background: linear-gradient(135deg, rgba(255,0,127,.25), rgba(168,85,247,.2));
+      box-shadow: 0 0 0 1px rgba(255,0,127,.15);
+    }
+    .setup-tab-join[aria-selected="true"] {
+      border-color: rgba(0,240,255,.45);
+      background: linear-gradient(135deg, rgba(0,240,255,.2), rgba(0,0,0,.35));
+      box-shadow: 0 0 0 1px rgba(0,240,255,.12);
+    }
   </style>
 </head>
 <body class="min-h-screen text-slate-200 font-sans px-3 py-3 sm:p-4 md:p-8">
   <div class="max-w-3xl mx-auto space-y-4 sm:space-y-5">
-    <header class="sticky top-0 z-40 -mx-3 px-3 py-2 sm:mx-0 sm:px-0 sm:py-0 mb-1 sm:mb-0 bg-[#0b0f19]/95 backdrop-blur-md border-b border-white/10 sm:border-0 sm:bg-transparent sm:backdrop-blur-none flex items-center justify-between gap-3">
+    <header class="sticky top-0 z-40 -mx-3 px-3 py-2.5 sm:mx-0 sm:px-0 sm:py-0 mb-1 sm:mb-0 bg-[#0b0f19]/95 backdrop-blur-md border-b border-white/10 sm:border-0 sm:bg-transparent sm:backdrop-blur-none flex items-center justify-between gap-3">
       <div class="min-w-0">
         <h1 class="font-display text-xl sm:text-2xl text-transparent bg-clip-text bg-gradient-to-r from-neonPink to-neonCyan">PARTIE AMIS</h1>
         <p class="text-[11px] sm:text-xs text-slate-400 truncate">Même catégorie · mêmes punchlines · classement</p>
       </div>
-      <a href="/" class="tap shrink-0 inline-flex items-center px-3 rounded-xl border border-neonCyan/40 bg-neonCyan/10 text-sm font-semibold text-neonCyan">← Accueil</a>
+      <div class="flex items-center gap-2 shrink-0">
+        <button type="button" data-sfx-toggle class="tap w-11 inline-flex items-center justify-center rounded-xl border border-white/15 bg-black/40 text-base" aria-pressed="true" title="Son">🔊</button>
+        <a href="/" class="tap shrink-0 inline-flex items-center px-3 rounded-xl border border-neonCyan/40 bg-neonCyan/10 text-sm font-semibold text-neonCyan">← Accueil</a>
+      </div>
     </header>
 
     <section id="setup" class="panel border border-white/10 rounded-2xl p-4 sm:p-5 space-y-4">
-      <div id="join-by-link" class="hidden space-y-3 border border-neonCyan/30 rounded-2xl p-4 bg-neonCyan/5">
-        <h2 class="text-base font-semibold text-neonCyan">On t’invite</h2>
-        <p class="text-xs text-slate-400">Salon <span id="invite-code-label" class="font-display tracking-widest text-white"></span></p>
+      <div id="join-by-link" class="hidden space-y-4 border border-neonCyan/30 rounded-2xl p-4 bg-neonCyan/5">
+        <h2 class="text-lg font-semibold text-neonCyan">On t’invite</h2>
+        <p class="text-xs text-slate-400 break-words">Salon <span id="invite-code-label" class="font-display tracking-widest text-white"></span></p>
         <p class="text-sm text-slate-300">Saisis juste ton prénom pour entrer.</p>
-        <label class="block text-xs text-slate-400">Ton prénom
-          <input id="invite-name" class="tap mt-1.5 w-full rounded-xl bg-black/40 border border-white/10 px-4 text-white" placeholder="Sam" autofocus autocomplete="nickname" />
+        <label class="field">
+          <span class="field-label">Ton prénom</span>
+          <input id="invite-name" class="field-control tap" placeholder="Sam" autofocus autocomplete="nickname" />
         </label>
-        <button id="btn-join-link" class="tap w-full bg-gradient-to-r from-neonPink to-purple-600 font-semibold rounded-xl active:scale-[0.98] transition">Rejoindre la partie</button>
+        <button id="btn-join-link" class="tap w-full bg-gradient-to-r from-neonPink to-purple-600 font-semibold rounded-xl active:scale-[0.98] transition text-base">Rejoindre la partie</button>
         <p id="invite-status" class="text-xs text-slate-500"></p>
-        <a href="/party.html" class="text-xs text-slate-500 hover:underline inline-block py-1">Créer un autre salon</a>
+        <a href="/party.html" class="text-sm text-slate-500 hover:underline inline-block py-2">Créer un autre salon</a>
       </div>
 
-      <div id="setup-full" class="grid gap-5 sm:grid-cols-2 sm:gap-4">
-        <div class="space-y-3">
-          <h2 class="text-sm font-semibold">Créer un salon</h2>
-          <label class="block text-xs text-slate-400">Ton prénom
-            <input id="host-name" class="tap mt-1.5 w-full rounded-xl bg-black/40 border border-white/10 px-4 text-white" placeholder="Alex" autocomplete="nickname" />
+      <div id="setup-full" class="space-y-4">
+        <!-- Mobile-first: one flow at a time -->
+        <div class="grid grid-cols-2 gap-2" role="tablist" aria-label="Créer ou rejoindre">
+          <button type="button" id="tab-create" class="setup-tab" role="tab" aria-selected="true" aria-controls="panel-create">Créer</button>
+          <button type="button" id="tab-join" class="setup-tab setup-tab-join" role="tab" aria-selected="false" aria-controls="panel-join">Rejoindre</button>
+        </div>
+
+        <div id="panel-create" role="tabpanel" class="space-y-3.5 rounded-2xl border border-neonPink/25 bg-neonPink/5 p-3.5 sm:p-4">
+          <div>
+            <h2 class="text-base font-semibold text-white">Créer un salon</h2>
+            <p class="text-xs text-slate-400 mt-1">Tu choisis la catégorie, le mode et tu partages le lien.</p>
+          </div>
+          <label class="field">
+            <span class="field-label">Ton prénom</span>
+            <input id="host-name" class="field-control tap" placeholder="Alex" autocomplete="nickname" />
           </label>
-          <label class="block text-xs text-slate-400">Catégorie
-            <select id="category" class="tap mt-1.5 w-full rounded-xl bg-black/40 border border-white/10 px-3 text-white"></select>
+          <label class="field">
+            <span class="field-label">Catégorie</span>
+            <select id="category" class="field-control tap"></select>
           </label>
-          <label class="block text-xs text-slate-400">Mode
-            <select id="party-mode" class="tap mt-1.5 w-full rounded-xl bg-black/40 border border-white/10 px-3 text-white">
-              <option value="classic">Normal (saisie libre)</option>
-              <option value="easy">Facile (quiz à choix)</option>
+          <label class="field">
+            <span class="field-label">Mode</span>
+            <select id="party-mode" class="field-control tap">
+              <option value="classic">Normal — saisie libre</option>
+              <option value="easy">Facile — quiz à choix</option>
             </select>
           </label>
-          <label class="block text-xs text-slate-400">Nombre de punchlines
-            <input id="rounds" type="number" min="3" max="30" value="8" inputmode="numeric" class="tap mt-1.5 w-full rounded-xl bg-black/40 border border-white/10 px-4 text-white" />
+          <label class="field">
+            <span class="field-label">Nombre de punchlines</span>
+            <div class="flex items-center gap-2">
+              <button type="button" id="rounds-minus" class="tap shrink-0 w-12 rounded-xl border border-white/15 bg-black/40 text-xl font-bold" aria-label="Moins">−</button>
+              <input id="rounds" type="number" min="3" max="30" value="8" inputmode="numeric" class="field-control tap text-center font-display text-lg tracking-wider" />
+              <button type="button" id="rounds-plus" class="tap shrink-0 w-12 rounded-xl border border-white/15 bg-black/40 text-xl font-bold" aria-label="Plus">+</button>
+            </div>
           </label>
-          <button id="btn-create" class="tap w-full bg-gradient-to-r from-neonPink to-purple-600 font-semibold rounded-xl active:scale-[0.98]">Créer</button>
+          <button id="btn-create" class="tap w-full bg-gradient-to-r from-neonPink to-purple-600 font-semibold rounded-xl active:scale-[0.98] text-base sticky bottom-[max(0.5rem,var(--safe-bottom))]">Créer le salon</button>
         </div>
-        <div class="space-y-3 border-t border-white/10 pt-4 sm:border-t-0 sm:pt-0">
-          <h2 class="text-sm font-semibold">Rejoindre avec un code</h2>
-          <label class="block text-xs text-slate-400">Ton prénom
-            <input id="join-name" class="tap mt-1.5 w-full rounded-xl bg-black/40 border border-white/10 px-4 text-white" placeholder="Sam" autocomplete="nickname" />
+
+        <div id="panel-join" role="tabpanel" class="hidden space-y-3.5 rounded-2xl border border-neonCyan/25 bg-neonCyan/5 p-3.5 sm:p-4">
+          <div>
+            <h2 class="text-base font-semibold text-white">Rejoindre avec un code</h2>
+            <p class="text-xs text-slate-400 mt-1">Entre le code à 6 caractères reçu par ton ami.</p>
+          </div>
+          <label class="field">
+            <span class="field-label">Ton prénom</span>
+            <input id="join-name" class="field-control tap" placeholder="Sam" autocomplete="nickname" />
           </label>
-          <label class="block text-xs text-slate-400">Code salon
-            <input id="join-code" class="tap mt-1.5 w-full rounded-xl bg-black/40 border border-white/10 px-4 uppercase tracking-[0.25em] text-center text-neonCyan" placeholder="ABC123" maxlength="8" autocapitalize="characters" />
+          <label class="field">
+            <span class="field-label">Code salon</span>
+            <input id="join-code" class="field-control tap uppercase tracking-[0.28em] text-center text-neonCyan text-xl font-display" placeholder="ABC123" maxlength="8" autocapitalize="characters" autocomplete="off" />
           </label>
-          <button id="btn-join" class="tap w-full bg-neonCyan/20 border border-neonCyan/40 text-neonCyan font-semibold rounded-xl">Rejoindre</button>
+          <button id="btn-join" class="tap w-full bg-neonCyan/20 border border-neonCyan/40 text-neonCyan font-semibold rounded-xl text-base">Rejoindre</button>
         </div>
       </div>
-      <p id="setup-status" class="text-xs text-slate-500"></p>
+      <p id="setup-status" class="text-xs text-slate-500 min-h-[1rem]"></p>
     </section>
 
     <section id="lobby" class="hidden panel border border-white/10 rounded-2xl p-4 sm:p-5 space-y-4">
@@ -103,7 +188,7 @@
       </div>
       <div class="space-y-2 rounded-2xl border border-neonCyan/25 bg-black/25 p-3 sm:p-4">
         <p class="text-xs text-slate-400">Lien d’invitation — tes amis n’ont qu’à entrer leur prénom</p>
-        <input id="invite-link" readonly class="w-full rounded-xl bg-black/40 border border-white/10 px-3 py-3 text-xs text-neonCyan" />
+        <input id="invite-link" readonly class="w-full rounded-xl bg-black/40 border border-white/10 px-3 py-3 text-xs sm:text-sm text-neonCyan break-all" />
         <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
           <button id="btn-copy-link" type="button" class="tap rounded-xl bg-neonCyan/20 border border-neonCyan/40 text-neonCyan text-sm font-semibold">Copier le lien</button>
           <button id="btn-share-link" type="button" class="hidden tap rounded-xl bg-neonPink/20 border border-neonPink/40 text-neonPink text-sm font-semibold">Envoyer</button>
@@ -185,6 +270,9 @@
 
   <script type="module">
     import { GameEngine, buildQuizChoices } from './src/services/gameService.js';
+    import { bindSfxToggle, playSuccess, playPartial, playError, playStreak, unlockSfx } from './src/services/sfx.js';
+
+    bindSfxToggle();
 
     const state = {
       code: null,
@@ -203,6 +291,69 @@
     const show = (id) => $(id).classList.remove('hidden');
     const hide = (id) => $(id).classList.add('hidden');
 
+    function setSetupTab(which) {
+      const create = which === 'create';
+      $('tab-create').setAttribute('aria-selected', create ? 'true' : 'false');
+      $('tab-join').setAttribute('aria-selected', create ? 'false' : 'true');
+      if (create) {
+        show('panel-create');
+        hide('panel-join');
+      } else {
+        hide('panel-create');
+        show('panel-join');
+        $('join-code')?.focus();
+      }
+    }
+    $('tab-create')?.addEventListener('click', () => setSetupTab('create'));
+    $('tab-join')?.addEventListener('click', () => setSetupTab('join'));
+
+    function clampRounds(n) {
+      return Math.max(3, Math.min(30, Number(n) || 8));
+    }
+    $('rounds-minus')?.addEventListener('click', () => {
+      $('rounds').value = String(clampRounds(Number($('rounds').value) - 1));
+    });
+    $('rounds-plus')?.addEventListener('click', () => {
+      $('rounds').value = String(clampRounds(Number($('rounds').value) + 1));
+    });
+    $('rounds')?.addEventListener('change', () => {
+      $('rounds').value = String(clampRounds($('rounds').value));
+    });
+
+    function celebrateWin() {
+      const colors = ['#ff007f', '#00f0ff', '#facc15', '#a855f7', '#ffffff'];
+      const card = $('g-quote')?.closest('.panel');
+      if (card) {
+        card.classList.remove('animate-win-pop');
+        void card.offsetWidth;
+        card.classList.add('animate-win-pop');
+      }
+      if (typeof confetti !== 'function') return;
+      confetti({
+        particleCount: 90,
+        spread: 72,
+        startVelocity: 38,
+        origin: { y: 0.62 },
+        colors,
+        disableForReducedMotion: true,
+      });
+      confetti({
+        particleCount: 40,
+        angle: 60,
+        spread: 55,
+        origin: { x: 0, y: 0.72 },
+        colors,
+        disableForReducedMotion: true,
+      });
+      confetti({
+        particleCount: 40,
+        angle: 120,
+        spread: 55,
+        origin: { x: 1, y: 0.72 },
+        colors,
+        disableForReducedMotion: true,
+      });
+    }
     async function loadCategories() {
       const res = await fetch('/api/music-refs/categories');
       const cats = await res.json();
@@ -595,6 +746,7 @@
         return;
       }
       const res = state.game.validateAnswer(artist, title);
+      unlockSfx();
       $('g-score').textContent = state.game.score;
       if (res.success) {
         $('g-toast').textContent = `${res.message} (+${res.pointsGained})`;
@@ -603,13 +755,19 @@
         if (res.isFullyGuessed) {
           $('g-reveal').textContent = `${state.game.currentQuote.artist} — ${state.game.currentQuote.title}`;
           $('g-reveal').classList.remove('hidden');
+          celebrateWin();
+          playSuccess();
+          if (state.game.streak > 1) playStreak();
           if (state.mode === 'easy') {
             $('g-quiz-artists').querySelectorAll('button').forEach((b) => { b.disabled = true; });
             $('g-quiz-titles').querySelectorAll('button').forEach((b) => { b.disabled = true; });
           }
+        } else {
+          playPartial();
         }
         await syncScore(false);
       } else {
+        playError();
         $('g-toast').textContent = res.message;
       }
     });

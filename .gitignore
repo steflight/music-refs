@@ -9,4 +9,12 @@ backend/data/
 *.db
 .venv/
 ACCES-ET-PROCEDURES.md
+android/.gradle/
+android/**/build/
+android/local.properties
+android/.idea/
+android/*.iml
+android/captures/
+ios/DerivedData/
+ios/**/xcuserdata/
 

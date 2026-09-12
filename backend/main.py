@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from config import get_settings
 from db import init_db, seed_from_json
 from routes.categories import router as categories_router
+from routes.daily import router as daily_router
 from routes.parties import router as parties_router
 from routes.quotes import router as quotes_router
 
@@ -18,17 +19,23 @@ AVAILABLE_ENDPOINTS = [
     "GET /api/music-refs/quotes",
     "GET /api/music-refs/random",
     "GET /api/music-refs/categories",
+    "GET /api/music-refs/daily",
+    "POST /api/music-refs/daily/answer",
+    "POST /api/music-refs/daily/result",
+    "GET /api/music-refs/daily/reveal",
+    "POST /api/music-refs/daily/challenge",
     "POST /api/music-refs/parties",
     "POST /api/music-refs/parties/join",
     "POST /api/music-refs/import",
     "POST /api/music-refs/quotes",
+    "PATCH /api/music-refs/quotes/{id}",
     "DELETE /api/music-refs/quotes/{id}",
 ]
 
 app = FastAPI(
     title="Music Refs API",
-    description="Punchlines, catégories & parties entre amis",
-    version="1.2.0",
+    description="Punchlines, catégories, parties & Refs du jour",
+    version="1.4.0",
 )
 
 settings = get_settings()
@@ -44,6 +51,7 @@ app.add_middleware(
 app.include_router(quotes_router)
 app.include_router(categories_router)
 app.include_router(parties_router)
+app.include_router(daily_router)
 
 
 def frontend_root() -> Path:
@@ -70,7 +78,7 @@ def on_startup() -> None:
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok", "service": "Music Refs API", "version": "1.2.0"}
+    return {"status": "ok", "service": "Music Refs API", "version": "1.4.0"}
 
 
 @app.get("/")
@@ -78,7 +86,7 @@ async def root(request: Request):
     accept = (request.headers.get("accept") or "").lower()
     wants_json = "application/json" in accept and "text/html" not in accept
     if wants_json:
-        return JSONResponse({"status": "ok", "service": "Music Refs API", "version": "1.2.0"})
+        return JSONResponse({"status": "ok", "service": "Music Refs API", "version": "1.4.0"})
     index = FRONT / "index.html"
     if index.exists():
         return HTMLResponse(index.read_text(encoding="utf-8"))
@@ -96,6 +104,17 @@ async def admin_page():
     )
 
 
+@app.get("/daily.html")
+async def daily_page():
+    page = FRONT / "daily.html"
+    if page.exists():
+        return FileResponse(page)
+    return JSONResponse(
+        {"error": "Not Found", "status_code": 404, "available_endpoints": AVAILABLE_ENDPOINTS},
+        status_code=404,
+    )
+
+
 @app.get("/party.html")
 async def party_page():
     page = FRONT / "party.html"
@@ -105,6 +124,30 @@ async def party_page():
         {"error": "Not Found", "status_code": 404, "available_endpoints": AVAILABLE_ENDPOINTS},
         status_code=404,
     )
+
+
+@app.get("/d/{code}")
+async def challenge_page(code: str):
+    """MR-14 — défi asynchrone : redirige vers daily avec le code."""
+    from fastapi.responses import RedirectResponse
+
+    return RedirectResponse(url=f"/daily.html?challenge={code}", status_code=302)
+
+
+@app.get("/manifest.webmanifest")
+async def web_manifest():
+    page = FRONT / "manifest.webmanifest"
+    if page.exists():
+        return FileResponse(page, media_type="application/manifest+json")
+    return JSONResponse({"name": "Music Refs", "start_url": "/daily.html", "display": "standalone"})
+
+
+@app.get("/sw.js")
+async def service_worker():
+    page = FRONT / "sw.js"
+    if page.exists():
+        return FileResponse(page, media_type="application/javascript")
+    return JSONResponse({"error": "Not Found"}, status_code=404)
 
 
 @app.exception_handler(404)

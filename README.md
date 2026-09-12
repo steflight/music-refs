@@ -4,7 +4,8 @@ Application web : deviner artiste + titre à partir d’une punchline.
 
 **Domaine** : `music-refs-dev.kladriva.ca`  
 **API / frontend** : port hôte **8084** (conteneur `music-refs-api`)  
-**ADA** reste sur **8082** — ne pas confondre.
+**ADA** reste sur **8082** — ne pas confondre.  
+**Backlog** : [`BACKLOG.md`](BACKLOG.md) (security by design, mobile, etc.)
 
 ## Démarrage
 
@@ -59,6 +60,15 @@ L’admin permet de **voir les réponses** (artiste + titre) pour chaque punchli
 2. Saisir **artiste + titre** (ex. Damso / Macarena).
 3. L’API appelle **LRCLIB** (paroles) + **iTunes** (année / album / genre).
 4. Cocher les lignes → Enregistrer → elles apparaissent dans `GET /api/music-refs/quotes`.
+
+Import massif (QA) :
+
+```bash
+ADMIN_TOKEN="$(grep ADMIN_TOKEN .env | cut -d= -f2)" \
+  python3 scripts/bulk_seed_lyrics.py --target 1000 --per-track 10
+```
+
+(Dadju, Singuila, M. Pokora, Booba, Orelsan, MHD + densification FR — admin peut corriger ensuite.)
 
 CLI :
 

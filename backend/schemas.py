@@ -14,6 +14,8 @@ class QuoteOut(BaseModel):
     artist: str
     title: str
     hints: Hints
+    listen_url: str = ""
+    rarity: str = "commune"
     category_ids: list[int] = Field(default_factory=list)
 
 
@@ -22,7 +24,17 @@ class QuoteCreate(BaseModel):
     artist: str = Field(min_length=1)
     title: str = Field(min_length=1)
     hints: Hints | None = None
+    listen_url: str = ""
+    rarity: str = Field(default="commune", pattern="^(commune|rare|legendaire)$")
     category_ids: list[int] = Field(default_factory=list)
+
+
+class QuoteUpdate(BaseModel):
+    quote: str | None = Field(default=None, min_length=3)
+    artist: str | None = Field(default=None, min_length=1)
+    title: str | None = Field(default=None, min_length=1)
+    listen_url: str | None = None
+    rarity: str | None = Field(default=None, pattern="^(commune|rare|legendaire)$")
 
 
 class QuotesBulkCreate(BaseModel):

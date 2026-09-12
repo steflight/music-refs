@@ -9,6 +9,7 @@ from db import (
     list_quotes,
     random_quote,
     set_quote_categories,
+    update_quote,
 )
 from providers import itunes, lrclib, musicbrainz
 from schemas import (
@@ -19,6 +20,7 @@ from schemas import (
     QuoteCategoriesSet,
     QuoteCreate,
     QuoteOut,
+    QuoteUpdate,
     QuotesBulkCreate,
 )
 
@@ -134,6 +136,8 @@ def create_quotes(body: QuotesBulkCreate) -> list[QuoteOut]:
                 genre=hints.genre,
                 album=hints.album,
                 initials=hints.initials,
+                listen_url=item.listen_url or "",
+                rarity=item.rarity or "commune",
                 category_ids=item.category_ids or None,
             )
             created.append(_to_out(q))
@@ -155,8 +159,27 @@ def create_one_quote(body: QuoteCreate) -> QuoteOut:
             genre=hints.genre,
             album=hints.album,
             initials=hints.initials,
+            listen_url=body.listen_url or "",
+            rarity=body.rarity or "commune",
             category_ids=body.category_ids or None,
         )
+    return _to_out(q)
+
+
+@router.patch("/quotes/{quote_id}", response_model=QuoteOut, dependencies=[Depends(require_admin)])
+def patch_quote(quote_id: int, body: QuoteUpdate) -> QuoteOut:
+    with get_db() as conn:
+        q = update_quote(
+            conn,
+            quote_id,
+            listen_url=body.listen_url,
+            rarity=body.rarity,
+            artist=body.artist,
+            title=body.title,
+            quote=body.quote,
+        )
+    if not q:
+        raise HTTPException(status_code=404, detail="Quote not found")
     return _to_out(q)
 
 

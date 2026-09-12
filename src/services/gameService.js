@@ -74,12 +74,24 @@ export function buildQuizChoices(currentQuote, pool, count = 4) {
   };
 }
 
+/** Strip leading articles (FR/EN) before normalize — « Le Titre » ↔ « Titre ». */
+export function stripLeadingArticles(str) {
+  if (!str) return '';
+  let out = String(str).trim();
+  let prev;
+  do {
+    prev = out;
+    out = out.replace(/^(l'|d'|l’|d’)/i, '').replace(/^(le|la|les|un|une|des|du|de|the|a|an|à)\s+/i, '').trim();
+  } while (out !== prev);
+  return out;
+}
+
 /**
  * Strips accents, punctuation, and converts string to lower-case for flexible comparison.
  */
 export function normalizeString(str) {
   if (!str) return '';
-  return str
+  return stripLeadingArticles(str)
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '') // remove diacritics
@@ -87,8 +99,52 @@ export function normalizeString(str) {
     .trim();
 }
 
+/** Tokenize keeping word boundaries (for Matt / M. / Pokora). */
+export function tokenizeName(str) {
+  if (!str) return [];
+  return stripLeadingArticles(str)
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[''`]/g, '')
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+}
+
 /**
- * Calculates simple similarity or substring match between user input and target answer.
+ * Known aliases (any form ↔ any form). Keep compact normalized keys.
+ * Extend freely for stage names / orthographe courante.
+ */
+const ALIAS_GROUPS = [
+  ['mpokora', 'mattpokora', 'matthieupokora'],
+  ['gims', 'maitregims'],
+  ['sexiondassaut', 'sexiondassault'],
+  ['belkatobis', 'belkatobbi', 'belkatobi'],
+];
+
+function aliasKeys(compact) {
+  const keys = new Set([compact]);
+  for (const group of ALIAS_GROUPS) {
+    if (group.includes(compact)) {
+      group.forEach((k) => keys.add(k));
+    }
+  }
+  return keys;
+}
+
+function firstNamesCompatible(a, b) {
+  if (!a || !b) return true;
+  if (a === b) return true;
+  // Initial : M. ↔ Matt, J. ↔ Jean
+  if (a.length === 1 && b.startsWith(a)) return true;
+  if (b.length === 1 && a.startsWith(b)) return true;
+  // Préfixe : Matt ↔ Matthew
+  if (a.length >= 3 && b.length >= 3 && (a.startsWith(b) || b.startsWith(a))) return true;
+  return levenshteinDistance(a, b) <= 1;
+}
+
+/**
+ * Flexible match: exact, substring, aliases, initiales (M. Pokora ↔ Matt Pokora), typos.
  */
 export function isMatch(input, target) {
   const normInput = normalizeString(input);
@@ -97,16 +153,39 @@ export function isMatch(input, target) {
 
   if (normInput === normTarget) return true;
 
-  // Allow partial match if input length >= 3 and is contained or close
+  // Alias groups (Matt Pokora ↔ M. Pokora, etc.)
+  const inAliases = aliasKeys(normInput);
+  const tgAliases = aliasKeys(normTarget);
+  for (const a of inAliases) {
+    if (tgAliases.has(a)) return true;
+  }
+
+  // Substring if input length >= 3
   if (normInput.length >= 3) {
     if (normTarget.includes(normInput) || normInput.includes(normTarget)) {
       return true;
     }
   }
 
-  // Levenshtein distance for fuzzy matching (allows 1 typo for short words, 2 for long)
+  // Token logic: "M. Pokora" ↔ "Matt Pokora", "Pokora" seul si assez long
+  const tIn = tokenizeName(input);
+  const tTg = tokenizeName(target);
+  if (tIn.length && tTg.length) {
+    const lastIn = tIn[tIn.length - 1];
+    const lastTg = tTg[tTg.length - 1];
+    if (lastIn.length >= 4 && lastIn === lastTg) {
+      if (tIn.length === 1 || tTg.length === 1) return true; // nom seul
+      if (firstNamesCompatible(tIn[0], tTg[0])) return true;
+    }
+    // Tous les tokens de la saisie (courte) présents dans la cible
+    if (tIn.length <= tTg.length && tIn.every((tok) => tTg.some((x) => x === tok || (tok.length === 1 && x.startsWith(tok)) || (tok.length >= 3 && x.startsWith(tok))))) {
+      return true;
+    }
+  }
+
+  // Levenshtein ≤2 si cible ≥6 lettres, sinon ≤1
   const dist = levenshteinDistance(normInput, normTarget);
-  const maxAllowed = normTarget.length > 6 ? 2 : 1;
+  const maxAllowed = normTarget.length >= 6 ? 2 : 1;
   return dist <= maxAllowed;
 }
 

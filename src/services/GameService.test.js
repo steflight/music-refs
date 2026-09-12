@@ -3,7 +3,9 @@ import { GameEngine, normalizeString, isMatch } from './gameService.js';
 
 describe('GameService & String Matching Engine', () => {
   it('US2: Normalizes strings correctly removing accents and punctuation', () => {
-    expect(normalizeString("A l'ammoniaque!")).toBe("alammoniaque");
+    // MR-11 : les articles initiaux (« A l' », « Le », « The »…) sont ignorés.
+    expect(normalizeString("A l'ammoniaque!")).toBe("ammoniaque");
+    expect(normalizeString("À l'ammoniaque")).toBe("ammoniaque");
     expect(normalizeString("  Ninho-- ")).toBe("ninho");
     expect(normalizeString("Été indien")).toBe("eteindien");
   });
