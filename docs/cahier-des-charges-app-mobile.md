@@ -4,6 +4,8 @@ Sep 27, 2026 · @stephane
 
 Révision du Sep 27, 2026 : développement en natif (Swift / SwiftUI pour iOS, Kotlin / Jetpack Compose pour Android) au lieu d'une base de code multiplateforme ; planning et risques mis à jour.
 
+Révision du Sep 28, 2026 : validation différée des réponses hors ligne, iOS 17 minimum, jeton anonyme pour les joueurs sans compte, notifications envoyées par le serveur pour les parties amis.
+
 ## Contexte et objectifs
 
 L'app mobile porte Music Refs sur iOS et Android pour bâtir une audience fidèle, en restant non commercial jusqu'à la signature de licences.
@@ -41,7 +43,7 @@ La cible principale est le fan de rap et de musiques urbaines francophones qui j
 Parcours principaux :
 
 1. **Première ouverture** : écran de règles en 3 cartes, partie d'essai guidée, puis création facultative d'un pseudo.
-2. **Rituel quotidien** : notification → Refs du jour (5 citations) → révélation après chaque réponse → carte de résultat à partager.
+2. **Rituel quotidien** : notification → Refs du jour (5 citations) → révélation après chaque réponse → carte de résultat à partager. Hors ligne : réponses enregistrées sans verdict, révélations et carte de résultat à la synchronisation.
 3. **Mode infini** : choix de catégorie et de difficulté → enchaînement des citations → record personnel.
 4. **Partie amis** : création d'un défi → lien d'invitation → mêmes citations pour tous → classement du défi.
 5. **Découverte** : révélation → extrait audio → « Écouter le morceau » sur la plateforme de l'utilisateur.
@@ -59,7 +61,7 @@ Le MVP reprend le jeu web et ajoute ce que le mobile fait mieux : notifications,
 | Score et progression | Score, combo, record, série quotidienne, « gel » de série | Indispensable | 1 |
 | Écran de révélation | Pochette, artiste, titre, album, extrait 30 s Deezer, boutons d'écoute | Indispensable | 1 |
 | Carte de résultat | Grille d'emojis + score, partage natif (WhatsApp, Instagram, X, TikTok) | Indispensable | 1 |
-| Notifications | Rappel quotidien à l'heure choisie, alerte de série en danger | Indispensable | 1 |
+| Notifications | Rappel quotidien à l'heure choisie, alerte de série en danger, résultat prêt après une partie hors ligne, activité des parties amis | Indispensable | 1 |
 | Accueil et règles | 3 cartes d'explication + partie d'essai | Indispensable | 1 |
 | Profil léger | Pseudo, avatar généré, statistiques ; compte facultatif | Important | 1 |
 | Partie amis | Défi par lien, mêmes citations, classement du défi | Important | 1 |
@@ -99,7 +101,7 @@ En phase 1, l'app ne génère aucun revenu direct ou indirect et n'utilise que d
 
 **Vie privée et stores**
 
-- Compte facultatif ; données minimales (pseudo, scores, préférences de notification).
+- Compte facultatif ; données minimales (pseudo, scores, préférences de notification). Sans compte, le joueur est identifié par un jeton anonyme, sans lien avec son identité ni avec un identifiant publicitaire.
 - Mesure d'audience sans cookies publicitaires ni revente de données ; politique de confidentialité conforme à la Loi 25 (Québec) et au RGPD pour les joueurs européens.
 - Fiches App Store et Google Play : app gratuite, sans achats intégrés ni publicité, classification d'âge adaptée aux paroles citées.
 - Pas de logos d'artistes ni de marques dans les visuels de l'app ou des fiches stores.
@@ -118,11 +120,13 @@ Le serveur n'enregistre que l'identifiant Deezer de chaque titre ; l'app demande
 | --- | --- |
 | Technologie | Natif sur chaque plateforme : Swift / SwiftUI pour iOS, Kotlin / Jetpack Compose pour Android. Choix motivé par la fluidité, l'audio, l'haptique, les notifications et le partage natifs |
 | Cohérence iOS / Android | Contrat d'API commun (OpenAPI) dont sont générés les clients des deux apps ; règles de jeu, validation des réponses et calcul du score côté serveur, jamais recodés dans chaque app ; textes externalisés partagés |
-| Plateformes | iOS 15+ et Android 8+, téléphones d'abord, tablettes compatibles |
+| Plateformes | iOS 17+ et Android 8+ (API 26), téléphones d'abord, tablettes compatibles. iOS 17 permet d'utiliser SwiftUI moderne (navigation, suivi d'état) sans solutions de contournement |
 | API | REST ou GraphQL versionnée, authentification par jeton, limitation de débit côté serveur |
+| Identité | Jeton anonyme créé par le serveur à la première ouverture, stocké de façon sécurisée (Keychain iOS, Keystore Android) ; séries, scores et parties amis rattachés à ce jeton ; rattachement au compte si le joueur en crée un, sans perte de progression |
 | Deezer | Appels côté appareil, gestion des erreurs de quota avec nouvel essai différé et repli sans audio |
 | Refs du jour | Tirage côté serveur, identique pour tous, bascule à minuit heure de Montréal (fuseau à confirmer) |
-| Hors ligne | Refs du jour préchargé (texte seulement), réponses synchronisées au retour du réseau ; audio indisponible hors ligne |
+| Hors ligne | Validation différée. Refs du jour préchargé : texte des 5 citations seulement, sans réponses ni indices. Hors ligne, chaque réponse est enregistrée avec son heure de saisie, sans verdict, et ne peut plus être modifiée ; les indices sont indisponibles. Au retour du réseau, le serveur valide les réponses et calcule score et combos ; une notification locale annonce le résultat, puis le joueur voit les révélations complètes et la carte de résultat. La série est conservée si les réponses sont saisies avant la bascule du jour et reçues par le serveur dans les 48 h. Mode infini et parties amis nécessitent le réseau ; audio indisponible hors ligne |
+| Notifications | Rappel quotidien, alerte de série et résultat prêt : notifications locales programmées sur l'appareil. Parties amis (ami qui relève le défi, classement final) : notifications envoyées par le serveur via APNs (iOS) et FCM (Android) |
 | Performance | Ouverture à froid sous 2 s, citation suivante sous 300 ms, démarrage de l'extrait sous 1 s en 4G |
 | Sécurité | Back-office hors de l'app et protégé, lien Admin retiré des écrans publics, réponses vérifiées côté serveur (pas de solution envoyée à l'app avant la réponse) |
 | Premium futur | Drapeaux de fonctionnalités prêts, aucun module de paiement intégré en phase 1 |
@@ -165,7 +169,7 @@ La phase 1 est estimée à environ 14 semaines, en 5 lots successifs, avec un d�
 | Lot | Contenu | Livrables | Durée estimée |
 | --- | --- | --- | --- |
 | 1. Cadrage et design | Parcours, maquettes (conventions iOS et Android), validation juridique du cadre de contenu | Maquettes Figma, prototype, note juridique | 2 semaines |
-| 2. API et back-office | Extension de l'API du site, contrat OpenAPI, Refs du jour côté serveur, validation des réponses, retraits | API documentée, back-office à jour | 3 semaines |
+| 2. API et back-office | Extension de l'API du site, contrat OpenAPI, jeton anonyme, Refs du jour côté serveur, validation des réponses (en ligne et différée), retraits, envoi des notifications APNs / FCM | API documentée, back-office à jour | 3 semaines |
 | 3. App — cœur du jeu | Jeu, indices, scores, séries, révélation, audio Deezer, développés en parallèle sur iOS et Android | Build de test iOS et Android | 5 semaines |
 | 4. Social et rétention | Partage, notifications, parties amis, profil, analytique, sur les deux plateformes | Build bêta iOS et Android | 3 semaines |
 | 5. Bêta et publication | Bêta fermée (TestFlight, test interne Play), corrections, fiches stores | App publiée sur les deux stores | 1 semaine + délais de revue |
@@ -178,7 +182,8 @@ Critères d'acceptation de la phase 1 :
 - [ ] Aucun fichier audio ni lien d'extrait n'est stocké sur le serveur ou l'appareil.
 - [ ] Une citation retirée dans le back-office disparaît de l'app sans nouvelle version.
 - [ ] Aucune publicité, aucun achat intégré, aucun SDK publicitaire dans le build.
-- [ ] Le jeu en mode texte fonctionne sans réseau pour Refs du jour déjà chargé.
+- [ ] Refs du jour déjà chargé se joue sans réseau ; score, révélations et série sont attribués à la synchronisation, sans perte de série.
+- [ ] Aucune solution (artiste, titre, album, initiales) n'est présente sur l'appareil avant la réponse, en ligne comme hors ligne.
 - [ ] Les objectifs de performance de la section technique sont atteints sur un Android d'entrée de gamme.
 - [ ] Le cadre de contenu a été validé par un juriste avant la soumission aux stores.
 
@@ -195,6 +200,7 @@ Le risque principal est juridique ; il est réduit par le cadre non commercial e
 | Faible rétention | Audience trop petite pour négocier | Notifications, séries, partage, packs thématiques |
 | Tentation de monétiser tôt | Exposition juridique plus forte | Porte explicite : licences signées + validation juridique |
 | Écarts entre les apps iOS et Android | Règles ou affichages différents selon la plateforme | Contrat OpenAPI commun, logique de jeu côté serveur, recette croisée sur les deux plateformes |
+| Triche sur une partie hors ligne | Séries ou scores gonflés | Réponses non modifiables, délai de synchronisation limité à 48 h, parties hors ligne exclues des classements en phase 2 |
 | Coût de deux bases de code | Planning et maintenance plus lourds | Développement en parallèle, fonctionnalités livrées sur les deux plateformes dans le même lot |
 
 Points ouverts :
